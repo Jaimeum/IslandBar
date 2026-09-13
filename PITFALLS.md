@@ -277,6 +277,50 @@ colours into a darker band (hue kept, chroma nudged up) so they still read again
 The mapping is applied in `IslandBarsView.updateNSView`, not in the store: the expanded
 popover sits on a dark HUD and must keep the pastel palette.
 
+### The idle mark contracts, then the slot contracts around it
+
+While nothing plays, `CompactIslandView` shrinks the pill into a miniature capsule holding
+three static bars (`CompactIslandMetrics.idleMarkSize`) and smoothly grows back when
+playback resumes; the full-size flat line is popover-only now. The status item's slot
+follows: `StatusItemController.applyPresence` narrows the hosting view's width constraint
+to `idleSlotWidth` 0.75 s after the pause (once the shrink has landed) and restores it
+immediately on play.
+
+What makes the handoff invisible:
+
+- The slot is sized by the hosting view's **width constraint**, not `NSStatusItem.length`.
+  Setting `length` reads back correctly (the log even showed `length=37 button=37`) but
+  does not resize the item — the button was still being measured from its subview
+  constraints, and the visible footprint never changed. The property is a red herring;
+  constrain the subview and let the variable-length item follow it.
+- The width change is a **snap, never an animation** (AppKit reflows the menu bar
+  instantly), which is why it is sequenced after the pill's own animation. Neighbouring
+  status items visibly shift once; nothing can smooth that.
+- `CompactIslandView`'s root is a `GeometryReader`, so it takes the slot's size rather
+  than the content's. Without it, the full-width bar row would widen the root while the
+  slot is narrow and drag the trailing-aligned mark left. Inside, the mark sits at
+  `idleInset` from the trailing edge — the one edge status-item layout pins — so the snap
+  moves nothing on screen.
+- The bars themselves `scaleEffect` towards that same trailing edge as they fade, because
+  the black capsule is invisible on a dark menu bar: without it the pill only crossfades
+  and there is no visible shrink to speak of.
+
+The idle mark keeps the neutral `BarsLayerView.idleColor`/`lightIdleColor`, not the last
+palette. Reduce Motion swaps the two states without the animation and collapses the slot
+at once.
+
+### Pause → idle takes as long as the output flag takes
+
+Chromium (Arc, Chrome) leaves `kAudioProcessPropertyIsRunningOutput` set for many seconds
+after a pause, and the override path trusted that flag alone: pause a YouTube video and
+the pill could keep dancing for ~10 s. `pollOutput` now has a second, faster signal: the
+analyzer's own `rmsDb`. A paused stream that the process keeps open feeds digital silence,
+so while MediaRemote says paused, the tap reporting `fromTap && rmsDb <= tapSilenceDb`
+for `tapSilenceGrace` (1.2 s) ends the override without waiting for the flag. The gate on
+`fromTap` matters — procedural motion publishes invented levels and would make a real
+playing session go idle. The flag + `outputQuietGrace` path is still there as the
+fallback when no tap exists (procedural mode, denied capture).
+
 ## Self-update
 
 ### A release key must ship before it signs anything

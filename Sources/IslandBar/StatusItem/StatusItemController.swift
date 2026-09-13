@@ -16,6 +16,12 @@ final class StatusItemController: NSObject {
     private var hostedHeight: CGFloat = 0
     private let settings: SettingsWindowController
     private let updater: UpdateController
+    /// The slot's width follows the pill: full while playing, contracted around the idle
+    /// mark once its shrink animation has landed. AppKit reflows the menu bar instantly,
+    /// so this can never be animated — only sequenced.
+    private var slotWork: DispatchWorkItem?
+    private var slotWidth = CompactIslandMetrics.pillWidth
+    private var slotWidthConstraint: NSLayoutConstraint?
     /// Accessory apps do not reliably get transient popovers dismissed by clicks in
     /// other apps, so watch for clicks ourselves while the popover is up.
     private var clickAwayMonitors: [Any] = []
@@ -53,13 +59,19 @@ final class StatusItemController: NSObject {
         view.sizingOptions = []
         view.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(view)
+        // The width constraint is what sizes a variable-length status item: setting
+        // `NSStatusItem.length` looked like it worked (the property read back 37) but the
+        // item kept its old footprint, because the button was still being measured from
+        // these constraints. So the slot's width is driven from here instead.
+        let width = view.widthAnchor.constraint(equalToConstant: CompactIslandMetrics.pillWidth)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: button.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: button.trailingAnchor),
             view.topAnchor.constraint(equalTo: button.topAnchor),
             view.bottomAnchor.constraint(equalTo: button.bottomAnchor),
-            view.widthAnchor.constraint(equalToConstant: CompactIslandMetrics.pillWidth),
+            width,
         ])
+        slotWidthConstraint = width
         hosting = view
 
         popover.behavior = .transient
@@ -68,6 +80,9 @@ final class StatusItemController: NSObject {
         // The card is built on first open (see togglePopover); a hosting tree that may
         // never be shown is not worth keeping resident.
 
+        // Nothing has reported yet, so this reaches its conclusion at once: an app that
+        // launches idle starts as the mark, not as a pill that shrinks a second later.
+        applyPresence(immediate: true)
         startObserving()
     }
 
@@ -84,6 +99,7 @@ final class StatusItemController: NSObject {
     private func tick() {
         withObservationTracking {
             applyVisibility()
+            applyPresence(immediate: false)
             _ = store.audioPermissionDenied
             _ = store.isPlaying
             _ = store.session?.paletteKey
@@ -93,8 +109,48 @@ final class StatusItemController: NSObject {
         }
     }
 
+    /// Contracts the slot once the pill's shrink spring has landed, and expands it up
+    /// front so the pill grows into space that is already there. The idle mark is drawn
+    /// at the slot's final trailing inset the whole time, so the snap itself moves
+    /// nothing on screen; only the neighbouring status items reflow, which AppKit does
+    /// without animation and which no amount of sequencing here could smooth.
+    private func applyPresence(immediate: Bool) {
+        slotWork?.cancel()
+        slotWork = nil
+        guard !store.isPlaying else {
+            setSlotWidth(CompactIslandMetrics.pillWidth)
+            return
+        }
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard !immediate, !reduceMotion else {
+            setSlotWidth(CompactIslandMetrics.idleSlotWidth)
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            self?.setSlotWidth(CompactIslandMetrics.idleSlotWidth)
+        }
+        slotWork = work
+        // Longer than the content's `smooth` shrink, so the slot only snaps once the
+        // mark has come to rest.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
+    }
+
+    private func setSlotWidth(_ width: CGFloat) {
+        guard width != slotWidth else { return }
+        slotWidth = width
+        slotWidthConstraint?.constant = width
+        DebugLog.line("status item slot width=\(Int(width))")
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let button = self.statusItem.button else { return }
+            DebugLog.line(
+                "slot layout length=\(Int(self.statusItem.length)) button=\(button.frame) "
+                    + "window=\(button.window?.frame ?? .zero)"
+            )
+        }
+    }
+
     func applyVisibility() {
-        // Persistent pill: always visible. When nothing plays the bars collapse to a flat line.
+        // Persistent pill: always visible. When nothing plays it contracts to the idle mark.
         if !statusItem.isVisible {
             statusItem.isVisible = true
             DebugLog.line("statusItem.isVisible=true")

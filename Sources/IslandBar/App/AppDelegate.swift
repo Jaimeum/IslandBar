@@ -21,11 +21,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences = Preferences()
         store = NowPlayingStore()
         let registry = AudioProcessRegistry()
-        monitor = NowPlayingMonitor(store: store, registry: registry)
+        let shared = SharedBarState()
+        monitor = NowPlayingMonitor(store: store, registry: registry, shared: shared)
         updater = UpdateController(preferences: preferences)
         settings = SettingsWindowController(preferences: preferences, updater: updater)
 
-        let shared = SharedBarState()
         tapController = TapController(registry: registry, shared: shared) { [weak self] levels, _, _ in
             // The pump already fires on the main queue; skip the actor hop on every frame.
             MainActor.assumeIsolated {

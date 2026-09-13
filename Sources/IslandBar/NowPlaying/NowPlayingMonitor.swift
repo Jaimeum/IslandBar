@@ -102,6 +102,7 @@ final class NowPlayingMonitor: MediaTransport {
     private let controller = MediaController()
     private let store: NowPlayingStore
     private let registry: AudioProcessRegistry
+    private let shared: SharedBarState
     private var nilWork: DispatchWorkItem?
     private var playingWork: DispatchWorkItem?
     private var restartAttempt = 0
@@ -116,6 +117,8 @@ final class NowPlayingMonitor: MediaTransport {
     /// True while `isPlaying` is held up by the app's audio output rather than MediaRemote.
     private var outputOverride = false
     private var outputQuietSince: Date?
+    /// When the tap first reported digital silence during an output override.
+    private var tapSilentSince: Date?
     private var outputPoll: DispatchSourceTimer?
 
     private var healthTimer: DispatchSourceTimer?
@@ -126,12 +129,20 @@ final class NowPlayingMonitor: MediaTransport {
     /// Chromium keeps its output stream open briefly after a pause; wait this long
     /// before dropping an overridden "playing" state.
     private static let outputQuietGrace: TimeInterval = 3
+    /// Digital silence as published by the tap. The analyzer treats anything under
+    /// -60 dB as inaudible; a paused stream lands at its floor (~-240), so this only
+    /// catches a stream that is running but carrying nothing.
+    private static let tapSilenceDb: Float = -80
+    /// How long the tap must stay silent before the override ends. Long enough to ride
+    /// out a silent beat in a video, short enough to beat the output flag by seconds.
+    private static let tapSilenceGrace: TimeInterval = 1.2
     private static let healthInterval: TimeInterval = 10
     private static let probeInterval: TimeInterval = 30
 
-    init(store: NowPlayingStore, registry: AudioProcessRegistry) {
+    init(store: NowPlayingStore, registry: AudioProcessRegistry, shared: SharedBarState) {
         self.store = store
         self.registry = registry
+        self.shared = shared
         store.transport = self
         controller.onTrackInfoReceived = { [weak self] info in
             Task { @MainActor in
@@ -351,7 +362,9 @@ final class NowPlayingMonitor: MediaTransport {
     private func startOutputPoll() {
         guard outputPoll == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 1, repeating: 1)
+        // Half-second ticks: the silence grace is short and the flag fallback should
+        // not add a whole extra second on top of its own grace.
+        timer.schedule(deadline: .now(), repeating: 0.5)
         timer.setEventHandler { [weak self] in
             self?.pollOutput()
         }
@@ -363,6 +376,7 @@ final class NowPlayingMonitor: MediaTransport {
         outputPoll?.cancel()
         outputPoll = nil
         outputQuietSince = nil
+        tapSilentSince = nil
     }
 
     private func pollOutput() {
@@ -371,9 +385,28 @@ final class NowPlayingMonitor: MediaTransport {
             return
         }
         if registry.isOutputActive(for: session) {
+            // The process still reports running output — Chromium keeps that flag up for
+            // many seconds after a pause, which is what used to make the pill wait ~10 s
+            // to go idle. The tap tells the truth sooner: a stream left open by a paused
+            // player feeds digital silence. Only trust it when the analyzer is the source
+            // (`fromTap`), because procedural motion publishes invented levels.
+            let snapshot = shared.snapshot()
+            if snapshot.fromTap, snapshot.rmsDb <= Self.tapSilenceDb {
+                let silentSince = tapSilentSince ?? Date()
+                tapSilentSince = silentSince
+                if Date().timeIntervalSince(silentSince) >= Self.tapSilenceGrace {
+                    DebugLog.line("isPlaying override ended: tap went silent")
+                    outputOverride = false
+                    stopOutputPoll()
+                    applyPlaying(false)
+                }
+            } else {
+                tapSilentSince = nil
+            }
             outputQuietSince = nil
             return
         }
+        tapSilentSince = nil
         let since = outputQuietSince ?? Date()
         outputQuietSince = since
         if Date().timeIntervalSince(since) >= Self.outputQuietGrace {

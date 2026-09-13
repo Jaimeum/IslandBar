@@ -31,7 +31,7 @@ ISLANDBAR_DEBUG=1 dist/IslandBar.app/Contents/MacOS/IslandBar
 
 ## Usage
 
-Left-click the pill to expand (artwork, title, transport). Right-click for Launch at Login, Settings, Check for Updates, and Quit. The pill is always visible: while nothing is playing the bars collapse to a flat gray line.
+Left-click the pill to expand (artwork, title, transport). Right-click for Launch at Login, Settings, Check for Updates, and Quit. The pill is always visible: while nothing is playing it shrinks into a compact idle mark — three static bars in a miniature capsule — and grows back to full size when playback resumes. The menu bar slot contracts around the mark after it has shrunk (and expands before the pill grows), so an idle IslandBar takes about half the pill's width. The mark is drawn at the slot's final trailing inset the whole time, so the slot's instant reflow never moves it.
 
 Bar colours come from the artwork: pixels are clustered in Oklab (k-means, plus a separate pass over the colourful pixels so a small accent on a dark cover is not averaged away) and the four most distinct dominant colours are ordered by hue and interpolated into a gradient across the bars. The runner-up colours are pulled halfway towards the dominant one, so the gradient reads as a single tint with a soft shift rather than a rainbow. Hue is kept; lightness is lifted and chroma is clamped to a pastel range for legibility on the black pill, and greyscale art gives grey bars. Before artwork arrives the bars show a lavender-to-mist default.
 
