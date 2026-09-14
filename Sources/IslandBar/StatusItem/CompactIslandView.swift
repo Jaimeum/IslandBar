@@ -4,23 +4,32 @@ import SwiftUI
 enum CompactIslandMetrics {
     /// Thin bars on a 3.5 pt pitch: whole pixels at 2x, so edges stay crisp.
     static let bars = BarMetrics(barWidth: 2, gap: 1.5, minHeight: 2, maxHeight: 14)
-    /// Bars only, no artwork: N bars + (N-1) gaps, plus 5 pt insets each side. The
-    /// capsule is invisible on a dark menu bar, so every point of inset reads as a gap.
-    static let pillWidth: CGFloat = bars.totalWidth + 10
+    /// Bars only, no artwork: N bars + (N-1) gaps. The leading inset is deliberately
+    /// smaller than the trailing one. The capsule is invisible on a dark menu bar, so
+    /// each inset reads as a gap to the neighbouring status item, and the stats readout
+    /// on the left ends in a wider gutter than the AirPods glyph on the right; at 2/5 pt
+    /// the two visible gaps come out even.
+    static let pillLeadingInset: CGFloat = 2
+    static let pillTrailingInset: CGFloat = 5
+    static let pillWidth: CGFloat = bars.totalWidth + pillLeadingInset + pillTrailingInset
     static let pillHeight: CGFloat = 18
 
     /// Idle mark: a miniature capsule holding three frozen bars (middle raised), the
-    /// visualizer at rest. The pill contracts to this, then the status item's slot
-    /// contracts around it.
-    static let idleBarHeights: [CGFloat] = [5, 8, 6]
+    /// visualizer at rest. The outer bars are the same height so neither end reads as a
+    /// bar that got clipped; only the middle rises. The pill contracts to this, then the
+    /// status item's slot contracts around it.
+    static let idleBarHeights: [CGFloat] = [6, 8, 6]
     static let idleBarsWidth: CGFloat = CGFloat(idleBarHeights.count) * bars.barWidth
         + CGFloat(idleBarHeights.count - 1) * bars.gap
-    static let idleMarkSize = CGSize(width: idleBarsWidth + 8, height: 13)
+    static let idleMarkMargin: CGFloat = 4
+    static let idleMarkSize = CGSize(width: idleBarsWidth + 2 * idleMarkMargin, height: 13)
     /// Margin between the idle mark and the slot's trailing edge, mirrored on the leading
     /// side once the slot contracts. The mark is drawn at this trailing inset even while
     /// the slot is still full, so collapsing the slot can never move it: the slot's
-    /// trailing edge is the one status-item layout anchors.
-    static let idleInset: CGFloat = 4
+    /// trailing edge is the one status-item layout anchors. `idleInset` + `idleMarkMargin`
+    /// equals the playing pill's trailing inset, so the mark's right edge lands where the
+    /// bar row's right edge was.
+    static let idleInset: CGFloat = 1
     static let idleSlotWidth: CGFloat = idleMarkSize.width + 2 * idleInset
     /// How far the live bar row shrinks towards the trailing edge as it fades into the
     /// mark. The capsule alone is already animating, but on a dark menu bar its black is
@@ -73,7 +82,13 @@ struct CompactIslandView: View {
                     metrics: CompactIslandMetrics.bars,
                     lightBackground: onLightMenuBar
                 )
-                .frame(width: CompactIslandMetrics.pillWidth, height: CompactIslandMetrics.pillHeight)
+                .frame(width: CompactIslandMetrics.bars.totalWidth, height: CompactIslandMetrics.pillHeight)
+                .padding(.leading, CompactIslandMetrics.pillLeadingInset)
+                .frame(
+                    width: CompactIslandMetrics.pillWidth,
+                    height: CompactIslandMetrics.pillHeight,
+                    alignment: .leading
+                )
                 .scaleEffect(idle ? CompactIslandMetrics.idleBarScale : 1, anchor: .trailing)
                 .opacity(idle ? 0 : 1)
                 IdleBarsMark(light: onLightMenuBar)
