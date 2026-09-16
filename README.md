@@ -49,9 +49,9 @@ Playback state comes from MediaRemote, with one exception: if MediaRemote report
 
 ### One tap per session
 
-Every Core Audio process tap is a recording session as far as macOS is concerned: creating one opens a session on the default output device, writes a `PlayAndRecord` route change into the `audiomxd` log, re-queries TCC for System Audio Recording, and prompts the user the first time. A tap therefore lasts as long as the Now Playing session does:
+Every Core Audio process tap is a recording session as far as macOS is concerned: creating one opens a session on the default output device, writes a `PlayAndRecord` route change into the `audiomxd` log, re-queries TCC for System Audio Recording, and prompts the user the first time. A tap therefore lasts as long as playback does:
 
-- Pausing does not tear the tap down. The FFT analyzer and the 60 Hz bar pump stop (an idle pill costs nothing), and the tap waits for the session to end.
+- Pausing stops capture at once: the aggregate device's IO engine halts. If the pause outlasts 30 seconds the tap itself is destroyed, and the next resume rebuilds it — macOS's purple recording indicator follows the tap's recording session, and a browser keeps a paused Now Playing session alive for hours, so holding the tap any longer would keep the indicator lit with nothing playing. Resuming inside the grace restarts the engine on the same tap, so a short pause costs no new recording session.
 - A tap is replaced only when it is genuinely wrong: its target processes stopped producing audio for 3 seconds, or a different process owns the same app's playback. Rebuilds are spaced by at least 15 seconds and then back off (20 s, 45 s, 90 s, 180 s, 300 s) within a session.
 - All tap creations reuse one stage-tap UID for the life of the process, so macOS sees the same recording identity rather than a new one each time.
 - Only a real TCC denial latches the procedural fallback, and it is retried after 5 minutes: a transient `coreaudiod` or device handover error no longer degrades the app until relaunch.

@@ -240,6 +240,25 @@ Music) or end are legitimate rebuilds; a rebuild roughly every couple of minutes
 continuous playback is not — the controller has `minTapResidency`, per-session backoff and
 target-liveness checks to prevent exactly that (`ProcessAudioTap.swift`, "Tap stability").
 
+### The indicator outlives the audio if the tap does
+
+macOS's purple recording indicator follows the tap's recording session, not the audio: a tap
+held through a pause (or through a browser's paused Now Playing session, which can stay
+alive for hours) keeps the indicator lit with nothing playing — the old "hold the tap until
+the session ends" rule showed it around the clock. Playback stopping therefore halts the
+aggregate device's engine at once and destroys the tap after `pauseTeardownGrace` (30 s);
+the next resume rebuilds it. Watch the sequencing in the log:
+
+```
+capture engine stopped reason=pause
+tap torn down reason=paused-grace                       # pause outlasted the grace
+capture engine restarted reason=playing                 # ...or this, if it did not
+```
+
+The grace is what keeps churn down: pause/resume inside it costs no recording session, and
+a resume after it is a legitimate new one. Do not keep a silent tap alive to save TCC
+queries — that is what lit the indicator in the first place.
+
 ## The pill's appearance
 
 ### It follows the menu bar, which follows the wallpaper — not the system setting

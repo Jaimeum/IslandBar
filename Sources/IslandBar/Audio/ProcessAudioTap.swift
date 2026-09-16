@@ -65,6 +65,10 @@ final class ProcessAudioTap: @unchecked Sendable {
     private var ioProcID: AudioDeviceIOProcID?
     private var ioCallbacks: Int = 0
     private(set) var isRunning = false
+    /// True while the aggregate device's engine is started. `stopEngine()` clears it
+    /// without touching the tap; `isEngineRunning` below is the device's own answer and
+    /// is only consulted for diagnostics.
+    private(set) var isEngineStarted = false
     private var asbd = AudioStreamBasicDescription()
 
     var sampleRate: Double { asbd.mSampleRate == 0 ? 48_000 : asbd.mSampleRate }
@@ -167,6 +171,7 @@ final class ProcessAudioTap: @unchecked Sendable {
             return startStatus
         }
         isRunning = true
+        isEngineStarted = true
         return noErr
     }
 
@@ -176,6 +181,7 @@ final class ProcessAudioTap: @unchecked Sendable {
 
     func stop() {
         isRunning = false
+        isEngineStarted = false
         if let ioProcID, aggregateID != CoreAudioProps.unknown {
             _ = AudioDeviceStop(aggregateID, ioProcID)
             _ = AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
@@ -193,6 +199,31 @@ final class ProcessAudioTap: @unchecked Sendable {
         ioCallbackCell?.deallocate()
         ioCallbackCell = nil
         ring.reset()
+    }
+
+    /// Halts the aggregate device's IO without destroying the tap. The tap object, its
+    /// IO proc and the recording session all stay up, so resuming is not a new session
+    /// for macOS; a stopped engine simply delivers nothing.
+    @discardableResult
+    func stopEngine() -> OSStatus {
+        guard isRunning, isEngineStarted, let ioProcID, aggregateID != CoreAudioProps.unknown else {
+            return noErr
+        }
+        let status = AudioDeviceStop(aggregateID, ioProcID)
+        if status == noErr { isEngineStarted = false }
+        return status
+    }
+
+    /// Restarts the engine `stopEngine()` halted. An error means the device refused to
+    /// come back; the caller destroys and rebuilds the tap in that case.
+    @discardableResult
+    func startEngine() -> OSStatus {
+        guard isRunning, !isEngineStarted, let ioProcID, aggregateID != CoreAudioProps.unknown else {
+            return kAudioHardwareIllegalOperationError
+        }
+        let status = AudioDeviceStart(aggregateID, ioProcID)
+        if status == noErr { isEngineStarted = true }
+        return status
     }
 }
 
@@ -235,6 +266,7 @@ final class TapController: @unchecked Sendable {
     private var phase: TapSource = .none
     private var ioWatchWork: DispatchWorkItem?
     private var selectWork: DispatchWorkItem?
+    private var pauseTeardownWork: DispatchWorkItem?
     private var lastTargetIDs: [AudioObjectID] = []
     private var permissionDenied = false
 
@@ -248,6 +280,11 @@ final class TapController: @unchecked Sendable {
     // query) about once every two minutes, plus a system warning that IslandBar was
     // "asking to record" too often. The rules below exist to make a tap last the whole
     // playing session instead.
+    //
+    // Pausing is the exception in the other direction: the recording session is what
+    // lights macOS's purple recording indicator, so a stop must not leave the session
+    // alive. The engine is halted at once and the tap itself is destroyed once
+    // `pauseTeardownGrace` has passed.
 
     /// A rebuild before this much time has passed is refused, whatever the reason.
     private static let minTapResidency: CFAbsoluteTime = 15
@@ -259,6 +296,13 @@ final class TapController: @unchecked Sendable {
     private static let narrowingWindow: CFAbsoluteTime = 20
     /// After a genuine permission error, wait this long before trying a tap again.
     private static let permissionRetry: CFAbsoluteTime = 300
+    /// How long a pause may hold the tap's recording session before the tap is
+    /// destroyed. The system's purple recording indicator follows the session, and a
+    /// browser keeps a paused Now Playing session alive for hours, so holding the tap
+    /// "until the session really ends" left the indicator on around the clock. Long
+    /// enough that pause/resume toggling does not reopen a session per space bar tap;
+    /// short enough that the indicator cannot outlive the pause by much.
+    private static let pauseTeardownGrace: CFAbsoluteTime = 30
 
     private var tapStartedAt: CFAbsoluteTime = 0
     private var rebuildsThisSession = 0
@@ -339,14 +383,22 @@ final class TapController: @unchecked Sendable {
             return
         }
 
-        // A pause is not a reason to throw the tap away: recreating it is what macOS
-        // reports as a fresh recording session. Stop the work that consumes audio and
-        // leave the tap itself alone until the session really ends.
+        // A pause must not leave a live recording session: macOS's purple recording
+        // indicator follows the tap, and a browser keeps a paused Now Playing session
+        // alive for hours. Halt the engine now and end the session itself once the
+        // grace has passed — unless playback resumes first, which cancels the teardown
+        // and restarts the same engine (no new session, no TCC query).
         if !isPlaying {
             targetLostSince = nil
+            ioWatchWork?.cancel()
             analyzer.stop()
             procedural.stop()
             pump.rest()
+            if tap.isEngineStarted {
+                tap.stopEngine()
+                DebugLog.line("capture engine stopped reason=pause")
+            }
+            schedulePauseTeardown()
             return
         }
 
@@ -379,6 +431,9 @@ final class TapController: @unchecked Sendable {
     private func renewTap(reason: String) {
         selectWork?.cancel()
         guard isPlaying, let session else { return }
+        // Playback is back: a pending pause teardown must not fire under a live engine.
+        pauseTeardownWork?.cancel()
+        pauseTeardownWork = nil
 
         if DebugLog.forceProcedural || prefs.analysisSource == .proceduralOnly {
             enterProcedural(reason: "forced-procedural (\(reason))")
@@ -405,14 +460,24 @@ final class TapController: @unchecked Sendable {
         }
 
         if phase.isTapping, tap.isRunning {
+            // Resuming after a pause: the engine was halted with the pause, so bring it
+            // back first; a rebuild is the fallback if it refuses to return.
+            var engineFailed = false
+            if !tap.isEngineStarted {
+                if tap.startEngine() == noErr {
+                    DebugLog.line("capture engine restarted reason=\(reason)")
+                } else {
+                    DebugLog.line("engine restart failed; rebuilding the tap")
+                    engineFailed = true
+                }
+            }
             // Whatever this call decides about the tap, the analyzer has to be draining
-            // it. A pause stops the analyzer and deliberately leaves the tap up, and
-            // `installTap` is the only other thing that starts one — so every early
-            // return below used to leave a live tap feeding nothing: `shared` kept the
-            // last levels the analyzer published and the bars froze for the rest of the
-            // session. It hid behind the crash on the pause path, because the relaunch
-            // that followed built a fresh tap.
-            if !analyzer.isRunning { attachAnalyzer() }
+            // it. A pause stops the analyzer and `installTap` is the only other thing
+            // that starts one — so every early return below used to leave a live tap
+            // feeding nothing: `shared` kept the last levels the analyzer published and
+            // the bars froze for the rest of the session. It hid behind the crash on the
+            // pause path, because the relaunch that followed built a fresh tap.
+            if !engineFailed, !analyzer.isRunning { attachAnalyzer() }
             let stale = !currentTargetsAreAlive()
             if stale {
                 targetLostSince = targetLostSince ?? now
@@ -420,9 +485,10 @@ final class TapController: @unchecked Sendable {
                 targetLostSince = nil
             }
             let current = lastTargetIDs
-            let needRebuild = sessionPIDChanged
-                ? current != matched
-                : (stale && now - (targetLostSince ?? now) >= Self.targetLossGrace)
+            let needRebuild = engineFailed
+                || (sessionPIDChanged
+                    ? current != matched
+                    : (stale && now - (targetLostSince ?? now) >= Self.targetLossGrace))
             if !needRebuild {
                 // Nothing to do: keep this tap and just poll again later.
                 scheduleReselect(after: Self.pollInterval(for: phase))
@@ -607,6 +673,36 @@ final class TapController: @unchecked Sendable {
         onUsingProcedural?(false)
     }
 
+    /// Arms the pause teardown. A pending work item is left alone: `applyLocked` runs
+    /// again on every store change, and re-arming would restart the grace each time.
+    private func schedulePauseTeardown() {
+        guard pauseTeardownWork == nil, tap.isRunning else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.tearDownPausedTap()
+        }
+        pauseTeardownWork = work
+        queue.asyncAfter(deadline: .now() + Self.pauseTeardownGrace, execute: work)
+    }
+
+    /// The pause outlasted the grace: destroy the tap, which ends the recording session
+    /// the system's purple recording indicator is tied to. A resume cancels this work
+    /// item before it runs, so the guards below are only a safety net.
+    private func tearDownPausedTap() {
+        pauseTeardownWork = nil
+        guard !isPlaying, session != nil, tap.isRunning else { return }
+        analyzer.stop()
+        tap.stop()
+        lastTargetIDs = []
+        phase = .none
+        rebuildsThisSession = 0
+        nextRebuildAt = 0
+        tapStartedAt = 0
+        lastSessionPID = nil
+        targetLostSince = nil
+        DebugLog.line("tap torn down reason=paused-grace")
+        onTapEvent?("tap torn down reason=paused-grace")
+    }
+
     private func scheduleReselect(after seconds: Double) {
         selectWork?.cancel()
         guard isPlaying, session != nil else { return }
@@ -620,8 +716,10 @@ final class TapController: @unchecked Sendable {
     private func cancelTimers() {
         ioWatchWork?.cancel()
         selectWork?.cancel()
+        pauseTeardownWork?.cancel()
         ioWatchWork = nil
         selectWork = nil
+        pauseTeardownWork = nil
     }
 
     /// Target lists are always sorted so that comparing them against the running tap's
