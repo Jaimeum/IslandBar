@@ -59,6 +59,14 @@ which is all macOS knows about them.
 Muting keeps the fader where it was, so unmuting returns to the level you had. Hovering a
 row names the app, and VoiceOver reads the name and the percentage.
 
+Clicking a row's icon and name brings that source to the front of the list; clicking it
+again lets it fall back into arrival order. It cannot do more than that: macOS publishes
+exactly one Now Playing session, so the tile keeps showing whichever app the system
+designates, and for every other source all the system will tell us is which app it is — not
+what it is playing, and not how to control it. What the list can do is put the source you
+are listening for at the top, where its fader is. Like every level here, the choice is not
+persisted.
+
 The playing app's fader survives a pause. An app drops its output connection the moment it
 pauses, which would otherwise retire its row a second or two later and leave the tile — the
 one source the card is built around — with a dead control, which is exactly when you reach

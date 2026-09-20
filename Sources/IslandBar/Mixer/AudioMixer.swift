@@ -27,6 +27,8 @@ struct MixerRow: Identifiable, Equatable {
 @Observable
 final class AudioMixer {
     private(set) var rows: [MixerRow] = []
+    /// The source the user has brought to the front of the list, if any.
+    private(set) var focusedID: String?
     var rowCount: Int { rows.count }
 
     @ObservationIgnored private let queue = DispatchQueue(label: "dev.burbuja-lab.islandbar.mixer")
@@ -98,6 +100,19 @@ final class AudioMixer {
         push()
     }
 
+    /// Brings a source to the front of the list, or lets it fall back into arrival order
+    /// when it is already there. macOS publishes one Now Playing session and no more, so
+    /// this cannot make another app's artwork or transport appear — the tile keeps showing
+    /// whichever app the system designates. What it can do is put the source you are
+    /// actually listening for at the top, where its fader is.
+    ///
+    /// Deliberately not persisted, like every other level on this card: it is a way to keep
+    /// an eye on something for a minute, not a setting.
+    func focus(_ id: String) {
+        focusedID = focusedID == id ? nil : id
+        rebuildRows()
+    }
+
     func toggleMute(_ id: String) {
         if muted.contains(id) {
             muted.remove(id)
@@ -125,12 +140,13 @@ final class AudioMixer {
         gains = gains.filter { live.contains($0.key) }
         muted = muted.filter { live.contains($0) }
         preMuteGain = preMuteGain.filter { live.contains($0.key) }
+        if let focusedID, !live.contains(focusedID) { self.focusedID = nil }
         rebuildRows()
         push()
     }
 
     private func rebuildRows() {
-        rows = snapshots.map { snapshot in
+        var built = snapshots.map { snapshot in
             MixerRow(
                 id: snapshot.id,
                 name: snapshot.name,
@@ -142,6 +158,13 @@ final class AudioMixer {
                 isAvailable: !denied
             )
         }
+        // Above the lister's arrival order, and only when the user asked for it. The click
+        // that moves a row is their own, so this is the one reordering that may happen
+        // under the pointer.
+        if let focusedID, let index = built.firstIndex(where: { $0.id == focusedID }), index > 0 {
+            built.insert(built.remove(at: index), at: 0)
+        }
+        rows = built
     }
 
     /// What the engine should actually render: silence while muted, otherwise the stored
