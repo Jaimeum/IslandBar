@@ -5,8 +5,11 @@ enum NowPlayingMetrics {
     static let artwork: CGFloat = 80
     static let faderGap: CGFloat = 10
 
-    /// A hero without a fader is the honest shape when the mixer cannot see the playing
-    /// app: a control that does nothing is worse than no control.
+    /// The fader's presence follows the *mixer*, not the row. A row comes and goes with
+    /// playback — a track change alone drops one for a second or two — and letting that
+    /// decide the tile's height made the whole card below it jump by 42 points while the
+    /// user was looking at it. With the mixer running the fader is always there; with the
+    /// mixer off it never is.
     static func height(hasFader: Bool) -> CGFloat {
         ControlGlass.panelPadding * 2
             + artwork
@@ -34,7 +37,7 @@ struct NowPlayingPanel: View {
                     details
                 }
                 .frame(height: NowPlayingMetrics.artwork)
-                if let row {
+                if showsFader {
                     fader(row)
                 }
             }
@@ -86,28 +89,39 @@ struct NowPlayingPanel: View {
         .frame(height: 22)
     }
 
-    private func fader(_ row: MixerRow) -> some View {
+    private var showsFader: Bool { !DebugLog.mixerDisabled }
+
+    /// Rendered with no row when the mixer cannot see the playing app — dimmed and inert,
+    /// holding its place. Losing the control for a moment is a smaller lie than the card
+    /// reflowing under the pointer every time a track changes.
+    @ViewBuilder
+    private func fader(_ row: MixerRow?) -> some View {
+        let live = row?.isAvailable == true
         HStack(spacing: ControlGlass.gutter) {
             ControlSlider(
-                travel: CGFloat(sqrt(max(row.gain, 0))),
-                isDimmed: row.isMuted,
-                isEnabled: row.isAvailable,
+                travel: CGFloat(sqrt(max(row?.gain ?? 1, 0))),
+                isDimmed: row?.isMuted == true,
+                isEnabled: live,
                 leadingSymbol: "speaker.fill",
-                accessibilityName: row.name,
-                onScrub: { mixer.setGain(Float($0 * $0), for: row.id) }
+                accessibilityName: row?.name ?? "Volume",
+                onScrub: { value in
+                    guard let row else { return }
+                    mixer.setGain(Float(value * value), for: row.id)
+                }
             )
             ControlCircleButton(
-                symbol: muteSymbol(isMuted: row.isMuted),
-                isOn: row.isMuted,
-                variableValue: row.isMuted ? 1 : Double(sqrt(max(row.gain, 0))),
-                accessibilityName: row.isMuted ? "Unmute \(row.name)" : "Mute \(row.name)"
+                symbol: muteSymbol(isMuted: row?.isMuted == true),
+                isOn: row?.isMuted == true,
+                variableValue: row?.isMuted == true ? 1 : Double(sqrt(max(row?.gain ?? 1, 0))),
+                accessibilityName: row.map { $0.isMuted ? "Unmute \($0.name)" : "Mute \($0.name)" }
+                    ?? "Mute"
             ) {
-                mixer.toggleMute(row.id)
+                if let row { mixer.toggleMute(row.id) }
             }
-            .disabled(!row.isAvailable)
+            .disabled(!live)
         }
         .frame(height: ControlGlass.sliderHeight)
-        .opacity(row.isAvailable ? 1 : 0.35)
+        .opacity(live ? 1 : 0.35)
     }
 
     private struct HeroBars: View {

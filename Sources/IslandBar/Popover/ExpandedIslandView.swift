@@ -26,7 +26,7 @@ enum ExpandedIslandMetrics {
     static func baseHeight(for plan: SourcePlan) -> CGFloat {
         var sections: [CGFloat] = []
         if plan.hasHero {
-            sections.append(NowPlayingMetrics.height(hasFader: plan.heroRow != nil))
+            sections.append(NowPlayingMetrics.height(hasFader: !DebugLog.mixerDisabled))
         }
         if !plan.others.isEmpty {
             sections.append(SourceListMetrics.height(rows: plan.others.count))

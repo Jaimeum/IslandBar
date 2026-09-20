@@ -6,6 +6,33 @@ instead of leaving it in a chat log.
 
 ## Popover
 
+### `NSPopover.animates` slides the card's contents across the screen
+
+The open animation grows the *window* from the status item — 123x94, 238x182, 366x279 — and
+because the hosting controller has `sizingOptions = []`, the card inside is laid out at its
+final size from the first frame. So nothing scales: the full-size card is drawn and merely
+revealed through a growing window. And the window's origin travels as it grows (x went -707,
+-764, -828 for a 340 pt card), so the contents visibly **slide** across the screen on the way
+in. The same animation on a content-size change drags the card's contents behind the new
+height when a section opens.
+
+At 300x150 this was small enough to pass for an animation. At 340 wide and 279 tall it reads
+as the card's contents jumping, which is what it is. `popover.animates = false`.
+
+**Check it** by sampling `CGWindowListCopyWindowInfo` every 40 ms while the popover opens:
+intermediate frames mean the animation is on. With it off there is exactly one frame, at the
+final size.
+
+### Verifying a vibrant popover needs a *screen* capture, not a window capture
+
+`screencapture -o -l <window id>` captures the window's own backing. An `NSVisualEffectView`
+with `blendingMode = .behindWindow` is composited by WindowServer from what is *behind* the
+window, which is not in that backing — so the whole vibrant area comes back flat grey and
+every backdrop defect looks fixed.
+
+Use `screencapture -x -R<x>,<y>,<w>,<h>` over the popover's frame instead. Hours were spent
+declaring a backdrop bug fixed against captures that could not have shown it.
+
 ### The blurred backdrop cannot be a representable in a card that resizes
 
 The expanded card's height is set imperatively (`NSPopover.contentSize` plus the content

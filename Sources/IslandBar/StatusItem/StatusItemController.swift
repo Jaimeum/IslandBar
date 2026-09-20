@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import QuartzCore
 import SwiftUI
 
 final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
@@ -86,6 +87,14 @@ final class StatusItemController: NSObject {
 
         popover.behavior = .transient
         popover.delegate = self
+        // No animation, ever. `NSPopover` animates by growing the *window* from the status
+        // item while the card inside is already laid out at its final size, so the content
+        // is drawn full-size and merely revealed — and because the window's origin travels
+        // as it grows, the whole card visibly slides across the screen on the way in. The
+        // old card was small enough to get away with it; this one is twice the height and
+        // it reads as the contents jumping. The same animation on a content-size change
+        // drags the card's contents behind the new height when the output list opens.
+        popover.animates = false
         popover.contentSize = ExpandedIslandMetrics.idleSize
         // The card is built on first open (see togglePopover); a hosting tree that may
         // never be shown is not worth keeping resident.
@@ -282,8 +291,17 @@ final class StatusItemController: NSObject {
             height: baseHeightFloor + ExpandedIslandMetrics.pickerHeight(for: plan)
         )
         guard size != popover.contentSize else { return }
+        DebugLog.line(
+            "card resize \(Int(popover.contentSize.height)) -> \(Int(size.height)) "
+                + "hero=\(plan.hasHero) heroFader=\(plan.heroRow != nil) others=\(plan.others.count) "
+                + "picking=\(plan.isPickingOutput) devices=\(plan.outputDeviceCount) floor=\(Int(baseHeightFloor))"
+        )
+        // One transaction, so the window and the view it hosts never disagree for a frame.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         popover.contentSize = size
         popover.contentViewController?.view.frame = NSRect(origin: .zero, size: size)
+        CATransaction.commit()
     }
 
     private func installClickAwayMonitors() {
