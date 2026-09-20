@@ -62,46 +62,33 @@ struct ExpandedIslandView: View {
         // Top-aligned: the card's height is monotonic while it is open, so when a source
         // disappears the card stays tall for a moment. A centred stack would slide
         // everything down into the gap.
-        ZStack(alignment: .top) {
-            HUDBackground()
-            VStack(spacing: ExpandedIslandMetrics.sectionGap) {
-                if plan.hasHero {
-                    NowPlayingPanel(row: plan.heroRow)
-                }
-                if !plan.others.isEmpty {
-                    SourceListPanel(rows: plan.others)
-                }
-                SoundPanel()
+        //
+        // The blurred backdrop is deliberately *not* here. It is an `NSVisualEffectView`
+        // installed as the popover's own container (see `StatusItemController`), because a
+        // representable inside this tree is resized by a SwiftUI layout pass that lands
+        // after the popover's frame has already grown: the blur stayed at the old height
+        // and the strip below it showed the window's raw backing, which read as the Sound
+        // panel being cut off below its slider.
+        VStack(spacing: ExpandedIslandMetrics.sectionGap) {
+            if plan.hasHero {
+                NowPlayingPanel(row: plan.heroRow)
             }
-            // Ideal heights, never negotiated. The card's height is resized from outside
-            // SwiftUI, so for a frame after a section grows the stack is still being
-            // offered the old height; without this the panels compress to fit and a
-            // section's background ends up shorter than the rows drawn inside it.
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(ExpandedIslandMetrics.padding)
+            if !plan.others.isEmpty {
+                SourceListPanel(rows: plan.others)
+            }
+            SoundPanel()
         }
+        // Ideal heights, never negotiated. The card's height is resized from outside
+        // SwiftUI, so for a frame after a section grows the stack is still being offered
+        // the old height; without this the panels compress to fit.
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(ExpandedIslandMetrics.padding)
         .frame(width: ExpandedIslandMetrics.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
         .environment(\.colorScheme, .dark)
         .foregroundStyle(.white)
     }
-}
-
-struct HUDBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        view.appearance = NSAppearance(named: .vibrantDark)
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 14
-        view.layer?.masksToBounds = true
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct WidthKey: PreferenceKey {

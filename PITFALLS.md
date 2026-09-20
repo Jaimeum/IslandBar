@@ -4,6 +4,34 @@ Hard-won, non-obvious traps in this codebase. Each one cost real debugging time;
 entry says how to recognize it and how to check it. If you hit something new, add it here
 instead of leaving it in a chat log.
 
+## Popover
+
+### The blurred backdrop cannot be a representable in a card that resizes
+
+The expanded card's height is set imperatively (`NSPopover.contentSize` plus the content
+view's frame, in `StatusItemController.resizeCard`), because the SwiftUI root must not
+re-measure the popover on every bar frame. An `NSVisualEffectView` hosted *inside* that
+SwiftUI tree is resized by a layout pass that lands **after** the window has already grown.
+
+The result is intermittent and reads as a completely different bug. Opening the output list
+grows the card by 66 pt; the blur stays at its old height; and the strip below it shows the
+popover's raw backing instead of blurred desktop. Because a panel's dark fill sits on top of
+that strip, the Sound panel looks like it has been **cut off below its slider**, with the
+device rows floating outside it.
+
+**Recognize it:** the rows are in the right place and the card is the right height — only the
+region below the old height is wrong. A `GeometryReader` probe on the panel reports the
+correct height (`139.0`), which rules out layout and points at drawing.
+
+**Check it:** sample one pixel column in the card's 14 pt outer padding, above and below the
+boundary. The backdrop must be the same colour at both; when the blur has lagged, the lower
+sample shows whatever window is behind the popover, so it varies horizontally with what is
+back there (dark over a terminal, light over a browser).
+
+The fix is that the blur is the popover's own `contentViewController.view`, with the hosting
+view added as an autoresizing subview. `resizeCard` then resizes the blur in the same
+statement as the window, and no layout pass is involved.
+
 ## Audio capture
 
 ### The tap UID must be fresh on every creation

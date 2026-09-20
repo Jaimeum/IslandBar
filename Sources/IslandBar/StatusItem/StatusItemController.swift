@@ -230,16 +230,41 @@ final class StatusItemController: NSObject {
     /// The card is sized imperatively, here and in `resizeCard`. Without clearing
     /// `sizingOptions` the hosting view re-measures the popover frame on every bar frame
     /// while the popover is open.
-    private func makeExpandedController() -> NSHostingController<some View> {
-        let controller = NSHostingController(
+    ///
+    /// The blurred backdrop is an `NSVisualEffectView` here rather than a representable
+    /// inside the SwiftUI tree, and it is the popover's own view so autoresizing carries
+    /// the frame straight to it. As a representable it was resized by a SwiftUI layout
+    /// pass that lands *after* the popover has already grown, so opening the output list
+    /// left the blur at its old height and the strip below it showed the window's raw
+    /// backing — which read as the Sound panel being cut off below its slider.
+    private func makeExpandedController() -> NSViewController {
+        let host = NSHostingController(
             rootView: ExpandedIslandView()
                 .environment(store)
                 .environment(preferences)
                 .environment(mixer)
                 .environment(system)
         )
-        controller.sizingOptions = []
-        controller.view.frame = NSRect(origin: .zero, size: ExpandedIslandMetrics.size(for: currentPlan()))
+        host.sizingOptions = []
+
+        let size = ExpandedIslandMetrics.size(for: currentPlan())
+        let backdrop = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        backdrop.material = .hudWindow
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .active
+        backdrop.appearance = NSAppearance(named: .vibrantDark)
+        backdrop.wantsLayer = true
+        backdrop.layer?.cornerRadius = 14
+        backdrop.layer?.masksToBounds = true
+        backdrop.autoresizesSubviews = true
+
+        host.view.frame = backdrop.bounds
+        host.view.autoresizingMask = [.width, .height]
+        backdrop.addSubview(host.view)
+
+        let controller = NSViewController()
+        controller.view = backdrop
+        controller.addChild(host)
         return controller
     }
 
