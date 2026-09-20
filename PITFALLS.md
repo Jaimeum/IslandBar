@@ -33,6 +33,27 @@ every backdrop defect looks fixed.
 Use `screencapture -x -R<x>,<y>,<w>,<h>` over the popover's frame instead. Hours were spent
 declaring a backdrop bug fixed against captures that could not have shown it.
 
+### `NSPopover` owns its content view's frame; setting it yourself narrows the card
+
+`NSPopover` lays its content view out into an area a little *wider* than the `contentSize`
+it was given — measured at 12 pt on macOS 26. Code that sets both:
+
+```swift
+popover.contentSize = size
+popover.contentViewController?.view.frame = NSRect(origin: .zero, size: size)   // wrong
+```
+
+works on the first show (the popover sized the view itself) and goes wrong on the first
+resize, when the assignment shrinks the view back to `size`.
+
+While the content view was an `NSHostingView` whose SwiftUI root filled whatever it was
+given, this was invisible. Once the content view is the blurred backdrop, the missing strip
+is unblurred popover background — a lighter band down the right-hand edge that appears only
+after the card has resized once.
+
+**Check it** by sampling one horizontal line near the right edge in both states: the colour
+transitions must land at the same x. Set `contentSize` and nothing else.
+
 ### The blurred backdrop cannot be a representable in a card that resizes
 
 The expanded card's height is set imperatively (`NSPopover.contentSize` plus the content

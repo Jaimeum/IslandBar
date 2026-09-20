@@ -256,8 +256,9 @@ final class StatusItemController: NSObject {
         )
         host.sizingOptions = []
 
-        let size = ExpandedIslandMetrics.size(for: currentPlan())
-        let backdrop = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        let backdrop = NSVisualEffectView(
+            frame: NSRect(origin: .zero, size: ExpandedIslandMetrics.size(for: currentPlan()))
+        )
         backdrop.material = .hudWindow
         backdrop.blendingMode = .behindWindow
         backdrop.state = .active
@@ -266,6 +267,7 @@ final class StatusItemController: NSObject {
         backdrop.layer?.cornerRadius = 14
         backdrop.layer?.masksToBounds = true
         backdrop.autoresizesSubviews = true
+        backdrop.autoresizingMask = [.width, .height]
 
         host.view.frame = backdrop.bounds
         host.view.autoresizingMask = [.width, .height]
@@ -296,11 +298,14 @@ final class StatusItemController: NSObject {
                 + "hero=\(plan.hasHero) heroFader=\(plan.heroRow != nil) others=\(plan.others.count) "
                 + "picking=\(plan.isPickingOutput) devices=\(plan.outputDeviceCount) floor=\(Int(baseHeightFloor))"
         )
-        // One transaction, so the window and the view it hosts never disagree for a frame.
+        // `contentSize` only. The content view's frame belongs to `NSPopover`, which lays
+        // it out into an area a little wider than the content size it was given — setting
+        // the frame to that size instead left the blurred backdrop 12 pt narrower than the
+        // card, as a lighter unblurred band down the right-hand edge. The hosting view
+        // autoresizes inside the backdrop, so one assignment moves everything.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         popover.contentSize = size
-        popover.contentViewController?.view.frame = NSRect(origin: .zero, size: size)
         CATransaction.commit()
     }
 
