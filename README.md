@@ -47,7 +47,12 @@ sliders you can grab anywhere, and round buttons beside them.
 The source with a Now Playing session leads, drawn as a tile — artwork, title, artist, the
 live bars, transport — with its own fader underneath. Every *other* app holding an output
 connection follows as a row: icon, name, fader, mute. Nothing appears twice, because the
-playing app's fader is built into its tile rather than repeated below. Under all of it sits
+playing app's fader is built into its tile rather than repeated below. The tile is joined to
+its own row through the session's *pid*, not the identifier MediaRemote reports: MediaRemote
+names whichever process registered the session, which for a WebKit app is the shared GPU
+process (`com.apple.WebKit.GPU`) rather than Safari. Resolving the pid the same way an audio
+process is resolved puts both sides in one id space — and gives the tile the name a person
+would use, instead of "Safari Graphics and Media". Under all of it sits
 **Sound**: the system's output volume, its mute, and the device it is playing through.
 
 The card degrades in both directions. Nothing playing means no tile; nothing making noise

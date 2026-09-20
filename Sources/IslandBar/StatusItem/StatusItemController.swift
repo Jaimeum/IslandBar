@@ -131,7 +131,7 @@ final class StatusItemController: NSObject {
     }
 
     private func currentPlan() -> SourcePlan {
-        SourcePlan.make(session: store.session, rows: mixer.rows, system: system)
+        SourcePlan.make(session: store.session, mixer: mixer, system: system)
     }
 
     private func tick() {

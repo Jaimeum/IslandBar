@@ -28,13 +28,16 @@ struct SourcePlan: Equatable {
     static let maxVisibleDevices = 5
 
     @MainActor
-    static func make(session: Session?, rows: [MixerRow], system: SystemAudioController) -> SourcePlan {
+    static func make(session: Session?, mixer: AudioMixer, system: SystemAudioController) -> SourcePlan {
+        let rows = mixer.rows
         let hero = session.flatMap { session in
-            // The bundle identifier is the join: MediaRemote reports the app's, and the
-            // mixer resolves a helper process up to its outermost `.app`, which is the same
-            // identifier for every browser and player tested. The name is a fallback for
-            // the ones where it is not.
-            rows.first { $0.id == session.bundleID }
+            // `nowPlayingID` is the join, not `session.bundleID`: MediaRemote names the
+            // process that registered the session, which for a WebKit app is the shared GPU
+            // process rather than the app. The mixer resolves the session's pid the same way
+            // it resolves an audio process, so both sides speak one id space. The raw
+            // identifier and the app's name remain as fallbacks.
+            rows.first { $0.id == mixer.nowPlayingID }
+                ?? rows.first { $0.id == session.bundleID }
                 ?? rows.first { $0.name.caseInsensitiveCompare(session.appName) == .orderedSame }
         }
         return SourcePlan(

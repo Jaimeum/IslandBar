@@ -69,7 +69,7 @@ struct NowPlayingPanel: View {
     private var meta: some View {
         HStack(spacing: 7) {
             HeroBars()
-            Text(store.session?.appName ?? "")
+            Text(sourceName)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.5))
                 .lineLimit(1)
@@ -138,11 +138,19 @@ struct NowPlayingPanel: View {
         }
     }
 
+    /// The app a person would name. MediaRemote reports whichever process registered the
+    /// session, so a WebKit app arrives calling itself "Safari Graphics and Media"; the
+    /// mixer's row carries the name of the `.app` that owns it.
+    private var sourceName: String {
+        row?.name ?? store.session?.appName ?? ""
+    }
+
     private var displayTitle: String {
         guard let session = store.session else { return "Not Playing" }
         if !session.title.isEmpty { return session.title }
         if !session.artist.isEmpty { return session.artist }
-        return store.isPlaying ? "Playing in \(session.appName)" : session.appName
+        let name = sourceName.isEmpty ? session.appName : sourceName
+        return store.isPlaying ? "Playing in \(name)" : name
     }
 
     private func transportButton(_ symbol: String, size: CGFloat, action: @escaping () -> Void) -> some View {

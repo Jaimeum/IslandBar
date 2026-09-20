@@ -29,6 +29,9 @@ final class AudioMixer {
     private(set) var rows: [MixerRow] = []
     /// The source the user has brought to the front of the list, if any.
     private(set) var focusedID: String?
+    /// The Now Playing app, in the mixer's own id space — which is not always the one
+    /// MediaRemote reports. See `setNowPlaying`.
+    private(set) var nowPlayingID: String?
     var rowCount: Int { rows.count }
 
     @ObservationIgnored private let queue = DispatchQueue(label: "dev.burbuja-lab.islandbar.mixer")
@@ -46,6 +49,9 @@ final class AudioMixer {
     @ObservationIgnored private var denied = false
     @ObservationIgnored private var icons: [String: NSImage] = [:]
     @ObservationIgnored private var started = false
+    /// One lookup per Now Playing app, and the answer never changes while it lives.
+    @ObservationIgnored private let appResolver = AudioAppResolver()
+    @ObservationIgnored private var resolvedPID: pid_t = 0
 
     init(registry: AudioProcessRegistry) {
         engine = MixerEngine(queue: queue, registry: registry)
@@ -84,8 +90,28 @@ final class AudioMixer {
     /// The app behind the Now Playing session. Its row is held open across a pause, because
     /// it is the source the card leads with and a paused track is exactly when you reach for
     /// its level. Nothing is tapped by this: a row at full volume still costs nothing.
-    func setNowPlaying(_ bundleID: String?) {
-        lister.setPinned(bundleID)
+    ///
+    /// The identifier is resolved through the session's *pid*, not taken from MediaRemote.
+    /// MediaRemote reports the identifier of whatever process registered the session, which
+    /// for Safari is `com.apple.WebKit.GPU` while the mixer — walking the same process up to
+    /// its outermost `.app` — calls it `com.apple.Safari`. Joining the card's tile to its own
+    /// row on the raw identifier therefore failed for every WebKit app: the tile lost its
+    /// fader and the app was listed a second time below it.
+    func setNowPlaying(bundleID: String?, pid: pid_t) {
+        guard let bundleID else {
+            resolvedPID = 0
+            nowPlayingID = nil
+            lister.setPinned(nil)
+            return
+        }
+        if pid > 0, pid != resolvedPID {
+            resolvedPID = pid
+            nowPlayingID = appResolver.identity(for: pid)?.id ?? bundleID
+        } else if pid <= 0 {
+            resolvedPID = 0
+            nowPlayingID = bundleID
+        }
+        lister.setPinned(nowPlayingID)
     }
 
     // MARK: - Intent

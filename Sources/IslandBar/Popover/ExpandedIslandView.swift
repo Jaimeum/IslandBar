@@ -58,7 +58,7 @@ struct ExpandedIslandView: View {
     @Environment(SystemAudioController.self) private var system
 
     var body: some View {
-        let plan = SourcePlan.make(session: store.session, rows: mixer.rows, system: system)
+        let plan = SourcePlan.make(session: store.session, mixer: mixer, system: system)
         // Top-aligned: the card's height is monotonic while it is open, so when a source
         // disappears the card stays tall for a moment. A centred stack would slide
         // everything down into the gap.
