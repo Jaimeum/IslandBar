@@ -79,6 +79,13 @@ final class AudioMixer {
         lister.setPopoverOpen(open)
     }
 
+    /// The app behind the Now Playing session. Its row is held open across a pause, because
+    /// it is the source the card leads with and a paused track is exactly when you reach for
+    /// its level. Nothing is tapped by this: a row at full volume still costs nothing.
+    func setNowPlaying(_ bundleID: String?) {
+        lister.setPinned(bundleID)
+    }
+
     // MARK: - Intent
 
     func setGain(_ gain: Float, for id: String) {

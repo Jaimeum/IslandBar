@@ -139,6 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let playing = store.isPlaying
             let prefs = preferences.snapshot
             if session != lastAppliedSession || playing != lastAppliedPlay {
+                // The mixer keeps this app's row open across a pause, so the card's hero
+                // tile keeps a working fader. It is wired here because the mixer has no
+                // view of Now Playing and this is already the one place that watches it.
+                mixer.setNowPlaying(session?.bundleID)
                 lastAppliedSession = session
                 lastAppliedPlay = playing
                 if !playing {

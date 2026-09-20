@@ -32,6 +32,8 @@ final class MixerAppLister: @unchecked Sendable {
     private var lastSeen: [String: Date] = [:]
     private var published: [MixerRowSnapshot] = []
     private var controlled: Set<String> = []
+    /// The app that owns the Now Playing session. Its row outlives a pause; see `poll`.
+    private var pinned: String?
     /// Arrival order, so rows keep the positions they were first given.
     private var order: [String: UInt64] = [:]
     private var nextOrder: UInt64 = 0
@@ -75,6 +77,12 @@ final class MixerAppLister: @unchecked Sendable {
         queue.async { [weak self] in self?.controlled = ids }
     }
 
+    /// The app that owns the Now Playing session, or nil when there is none. Its row
+    /// outlives a pause, so the card's hero tile keeps a fader that works.
+    func setPinned(_ id: String?) {
+        queue.async { [weak self] in self?.pinned = id }
+    }
+
     private func restart() {
         timer?.cancel()
         let source = DispatchSource.makeTimerSource(queue: queue)
@@ -93,6 +101,10 @@ final class MixerAppLister: @unchecked Sendable {
 
         var grouped: [String: MixerRowSnapshot] = [:]
         var running: Set<String> = []
+        // Kept for the pinned app alone, which by definition has no output connection to
+        // group by while it is paused.
+        var identities: [String: AudioAppIdentity] = [:]
+        var liveProcesses: [String: [AudioObjectID]] = [:]
         for process in processes {
             // IslandBar holds an output connection of its own, because the visualizer's
             // aggregate device is one. A device-based filter cannot tell it apart, so it is
@@ -100,6 +112,10 @@ final class MixerAppLister: @unchecked Sendable {
             guard process.pid != me else { continue }
             guard let identity = resolver.identity(for: process.pid) else { continue }
             running.insert(identity.id)
+            if identity.id == pinned {
+                identities[identity.id] = identity
+                liveProcesses[identity.id, default: []].append(process.objectID)
+            }
             // A live output connection is a steadier signal than `isRunningOutput`, and it
             // excludes the twenty-odd system daemons for free — no denylist needed.
             guard !registry.outputDevices(for: process.objectID).isEmpty else { continue }
@@ -110,6 +126,27 @@ final class MixerAppLister: @unchecked Sendable {
                 appPath: identity.appPath,
                 processes: []
             )].processes.append(process.objectID)
+        }
+
+        // The app behind the Now Playing session keeps its row across a pause. Pausing drops
+        // its output connection at once, which used to retire the row a second or two later
+        // and with it the fader on the card's hero tile — so the one source the card is
+        // built around was the one whose level you could not set while it was paused.
+        //
+        // Its process objects are re-read from this poll rather than carried over from the
+        // last one, so the row can never hold an object id that has since died. Being alive
+        // is the whole condition: no live audio process, no row.
+        if let pinned, grouped[pinned] == nil, let identity = identities[pinned],
+           let objects = liveProcesses[pinned], !objects.isEmpty {
+            // Keep the clock rolling, so losing the session later starts a fresh linger
+            // instead of expiring on the very next poll.
+            lastSeen[pinned] = now
+            grouped[pinned] = MixerRowSnapshot(
+                id: identity.id,
+                name: identity.name,
+                appPath: identity.appPath,
+                processes: objects
+            )
         }
 
         // `grouped` is a dictionary, so its values come out in an arbitrary order. Sorting

@@ -59,6 +59,14 @@ which is all macOS knows about them.
 Muting keeps the fader where it was, so unmuting returns to the level you had. Hovering a
 row names the app, and VoiceOver reads the name and the percentage.
 
+The playing app's fader survives a pause. An app drops its output connection the moment it
+pauses, which would otherwise retire its row a second or two later and leave the tile — the
+one source the card is built around — with a dead control, which is exactly when you reach
+for its level. The row is held open for as long as the app has a live audio process, and its
+process objects are re-read on every poll rather than carried over, so it can never refer to
+one that has since died. An app at full volume is still never tapped, so this costs nothing
+and lights no recording indicator.
+
 #### Output and system volume
 
 The **Sound** panel's heading is the device: click it to fold out every output the Mac has
