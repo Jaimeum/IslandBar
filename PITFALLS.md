@@ -4,6 +4,34 @@ Hard-won, non-obvious traps in this codebase. Each one cost real debugging time;
 entry says how to recognize it and how to check it. If you hit something new, add it here
 instead of leaving it in a chat log.
 
+## Popover
+
+### The blurred backdrop cannot be a representable in a card that resizes
+
+The expanded card's height is set imperatively (`NSPopover.contentSize` plus the content
+view's frame, in `StatusItemController.resizeCard`), because the SwiftUI root must not
+re-measure the popover on every bar frame. An `NSVisualEffectView` hosted *inside* that
+SwiftUI tree is resized by a layout pass that lands **after** the window has already grown.
+
+The result is intermittent and reads as a completely different bug. Opening the output list
+grows the card by 66 pt; the blur stays at its old height; and the strip below it shows the
+popover's raw backing instead of blurred desktop. Because a panel's dark fill sits on top of
+that strip, the Sound panel looks like it has been **cut off below its slider**, with the
+device rows floating outside it.
+
+**Recognize it:** the rows are in the right place and the card is the right height — only the
+region below the old height is wrong. A `GeometryReader` probe on the panel reports the
+correct height (`139.0`), which rules out layout and points at drawing.
+
+**Check it:** sample one pixel column in the card's 14 pt outer padding, above and below the
+boundary. The backdrop must be the same colour at both; when the blur has lagged, the lower
+sample shows whatever window is behind the popover, so it varies horizontally with what is
+back there (dark over a terminal, light over a browser).
+
+The fix is that the blur is the popover's own `contentViewController.view`, with the hosting
+view added as an autoresizing subview. `resizeCard` then resizes the blur in the same
+statement as the window, and no layout pass is involved.
+
 ## Audio capture
 
 ### The tap UID must be fresh on every creation
@@ -160,6 +188,78 @@ Gate any such test on `isPlaying=false applied` actually appearing in the log: a
 pause usually does **not** reach the store straight away, because `effectivePlaying` keeps
 the session playing while the app is still producing output (Arc holds its output unit open
 for a few seconds). A pause shorter than that grace tests nothing.
+
+## Per-app volume
+
+### A `.muted` tap mutes nothing until its aggregate is *started*
+
+Creating a `CATapDescription` with `muteBehavior = .muted` and calling
+`AudioHardwareCreateProcessTap` looks like it should silence the app. It does not. The mute
+engages only once that tap sits in an aggregate device whose IO proc has been started with
+`AudioDeviceStart`.
+
+Measured with a microphone against a steady tone: tap created but attached to nothing gave
+`f440=0.013515` against a `0.013491` baseline — no change at all.
+
+**Recognize it:** `mixer tap created` in the log, no `mixer engine started`, and the app is
+still audible.
+**Check it:** there is no cheap "just mute it" path — mute costs exactly what volume costs,
+which is why `AudioMixer` treats mute as gain 0 on the same fader rather than as a separate
+mechanism.
+
+### `kAudioAggregateDeviceTapAutoStartKey` defers the mute
+
+The visualizer's aggregate sets it to `true`, and should. The mixer's aggregate must **not**.
+The key makes `AudioDeviceStart` wait for the first tapped process to produce audio, which
+defers the device start — and with it the mute. A mute click would appear to do nothing
+until the app next happened to make a sound.
+
+**Recognize it:** muting a paused or quiet app has no effect, then takes effect later.
+**Check it:** `MixerEngine` omits the key deliberately and comments why; copying
+`ProcessAudioTap.start()` wholesale is how it gets reintroduced.
+
+### Verifying a mute with another tap lies
+
+A tap reads a pre-mute mix point. A second tap watching an app that a `.muted` tap has
+silenced still reports it at **full amplitude**, while the speakers are provably silent.
+
+**Recognize it:** a probe that taps its way to "the mute did not work" while the room is quiet.
+**Check it:** only an acoustic measurement proves a mute. The corollary is load-bearing and
+deliberate: the visualizer's `.unmuted` tap keeps receiving a muted app's audio, so the pill's
+bars keep animating for an app the mixer has silenced.
+
+### `kAudioProcessPropertyDevices` answers only in the output scope
+
+Asked in `kAudioObjectPropertyScopeGlobal` it returns an empty array for **every** process,
+including ones that are audibly playing — which reads as "nothing is using audio" rather than
+as an error.
+
+**Check it:** `swift Tools/mixerprobe.swift` prints both scopes per process. Output scope is
+also what reduces ~35 process objects to the 2-3 apps actually holding an output, with no
+denylist needed.
+
+### There is no per-process volume or mute property
+
+All six `kAudioProcessProperty*` selectors (`ppid`, `pbid`, `pdv#`, `pir?`, `piri`, `piro`)
+are read-only in every scope. `kAudioHardwarePropertyProcessIsAudible` exists only on the
+system object and mutes *the calling process*. Per-app level is therefore not a property
+write; it is "sever the app with a `.muted` tap, then re-render its samples yourself".
+
+### Retiring a slot is an ordered pair of writes
+
+Returning an app to normal means dropping its gain to 0 **first**, then flipping its tap's
+`muteBehavior` to `.unmuted`. Do it the other way round and both the original and the
+re-rendered copy are audible for a moment, which comb-filters: measured at 56% of baseline
+with a suckout at the test tone.
+
+**Recognize it:** a brief hollow or phasey sound when a fader returns to full.
+
+### `prefix3` is unsound for grouping WebKit processes
+
+`AudioProcessRegistry.matches` compares three-component bundle prefixes, which is right for
+matching a now-playing session. It cannot group mixer rows: two simultaneous processes both
+reporting `com.apple.WebKit.GPU` belonged to Safari and to WebThumbnailExtension, and no
+string function separates them. Only `responsibility_get_pid_responsible_for_pid` does.
 
 ## Diagnosing "the bars are not moving"
 
