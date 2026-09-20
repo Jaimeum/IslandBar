@@ -3,7 +3,15 @@ import SwiftUI
 
 enum CompactIslandMetrics {
     /// Thin bars on a 3.5 pt pitch: whole pixels at 2x, so edges stay crisp.
-    static let bars = BarMetrics(barWidth: 2, gap: 1.5, minHeight: 2, maxHeight: 14)
+    static let barWidth: CGFloat = 2
+    static let gap: CGFloat = 1.5
+    static let minBarHeight: CGFloat = 2
+    static let maxBarHeight: CGFloat = 14
+
+    static func bars(count: Int) -> BarMetrics {
+        BarMetrics(barWidth: barWidth, gap: gap, minHeight: minBarHeight, maxHeight: maxBarHeight, count: count)
+    }
+
     /// Bars only, no artwork: N bars + (N-1) gaps. The leading inset is deliberately
     /// smaller than the trailing one. The capsule is invisible on a dark menu bar, so
     /// each inset reads as a gap to the neighbouring status item, and the stats readout
@@ -11,7 +19,9 @@ enum CompactIslandMetrics {
     /// the two visible gaps come out even.
     static let pillLeadingInset: CGFloat = 2
     static let pillTrailingInset: CGFloat = 5
-    static let pillWidth: CGFloat = bars.totalWidth + pillLeadingInset + pillTrailingInset
+    static func pillWidth(count: Int) -> CGFloat {
+        bars(count: count).totalWidth + pillLeadingInset + pillTrailingInset
+    }
     static let pillHeight: CGFloat = 18
 
     /// Idle mark: a miniature capsule holding three frozen bars (middle raised), the
@@ -19,8 +29,8 @@ enum CompactIslandMetrics {
     /// bar that got clipped; only the middle rises. The pill contracts to this, then the
     /// status item's slot contracts around it.
     static let idleBarHeights: [CGFloat] = [6, 8, 6]
-    static let idleBarsWidth: CGFloat = CGFloat(idleBarHeights.count) * bars.barWidth
-        + CGFloat(idleBarHeights.count - 1) * bars.gap
+    static let idleBarsWidth: CGFloat = CGFloat(idleBarHeights.count) * barWidth
+        + CGFloat(idleBarHeights.count - 1) * gap
     static let idleMarkMargin: CGFloat = 4
     static let idleMarkSize = CGSize(width: idleBarsWidth + 2 * idleMarkMargin, height: 13)
     /// Margin between the idle mark and the slot's trailing edge, mirrored on the leading
@@ -51,6 +61,10 @@ struct CompactIslandView: View {
     /// they stay readable against white.
     private var onLightMenuBar: Bool { DebugLog.forcedPillIsLight ?? (colorScheme == .light) }
 
+    private var barCount: Int { preferences.visualizerBarCount }
+    private var bars: BarMetrics { CompactIslandMetrics.bars(count: barCount) }
+    private var pillWidth: CGFloat { CompactIslandMetrics.pillWidth(count: barCount) }
+
     var body: some View {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let idle = !store.isPlaying
@@ -70,7 +84,7 @@ struct CompactIslandView: View {
                     Capsule()
                         .fill(Color.black.opacity(0.92))
                         .frame(
-                            width: idle ? CompactIslandMetrics.idleMarkSize.width : CompactIslandMetrics.pillWidth,
+                            width: idle ? CompactIslandMetrics.idleMarkSize.width : pillWidth,
                             height: idle ? CompactIslandMetrics.idleMarkSize.height : CompactIslandMetrics.pillHeight
                         )
                         .padding(.trailing, idle ? CompactIslandMetrics.idleInset : 0)
@@ -79,13 +93,14 @@ struct CompactIslandView: View {
                     flat: false,
                     animating: store.isPlaying && !reduceMotion,
                     palette: store.palette,
-                    metrics: CompactIslandMetrics.bars,
+                    metrics: bars,
                     lightBackground: onLightMenuBar
                 )
-                .frame(width: CompactIslandMetrics.bars.totalWidth, height: CompactIslandMetrics.pillHeight)
+                .id(barCount)
+                .frame(width: bars.totalWidth, height: CompactIslandMetrics.pillHeight)
                 .padding(.leading, CompactIslandMetrics.pillLeadingInset)
                 .frame(
-                    width: CompactIslandMetrics.pillWidth,
+                    width: pillWidth,
                     height: CompactIslandMetrics.pillHeight,
                     alignment: .leading
                 )
@@ -116,11 +131,11 @@ private struct IdleBarsMark: View {
     var light: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: CompactIslandMetrics.bars.gap) {
+        HStack(alignment: .center, spacing: CompactIslandMetrics.gap) {
             ForEach(CompactIslandMetrics.idleBarHeights.indices, id: \.self) { index in
                 Capsule()
                     .frame(
-                        width: CompactIslandMetrics.bars.barWidth,
+                        width: CompactIslandMetrics.barWidth,
                         height: CompactIslandMetrics.idleBarHeights[index]
                     )
             }

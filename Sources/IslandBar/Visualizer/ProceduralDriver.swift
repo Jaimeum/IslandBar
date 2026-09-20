@@ -2,21 +2,25 @@ import Foundation
 
 final class ProceduralDriver: @unchecked Sendable {
     private let shared: SharedBarState
+    private let barCount: Int
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "dev.burbuja-lab.islandbar.procedural")
     private var t: Double = 0
-    private var envelope: [Float] = BarLevels.rest.values
-    private let phases: [(f1: Double, f2: Double, p: Double)] = (0..<BarLevels.count).map { (i: Int) -> (f1: Double, f2: Double, p: Double) in
-        // Spread the same frequency range over however many bars there are.
-        let k = Double(i) * 7 / Double(max(1, BarLevels.count - 1))
-        let f1: Double = 0.90 + 0.12 * k
-        let f2: Double = 1.70 + 0.11 * k
-        let p: Double = 0.7 * k
-        return (f1: f1, f2: f2, p: p)
-    }
+    private var envelope: [Float]
+    private let phases: [(f1: Double, f2: Double, p: Double)]
 
-    init(shared: SharedBarState) {
+    init(shared: SharedBarState, barCount: Int) {
         self.shared = shared
+        self.barCount = barCount
+        self.envelope = BarLevels.rest(count: barCount).values
+        self.phases = (0..<barCount).map { (i: Int) -> (f1: Double, f2: Double, p: Double) in
+            // Spread the same frequency range over however many bars there are.
+            let k = Double(i) * 7 / Double(max(1, barCount - 1))
+            let f1: Double = 0.90 + 0.12 * k
+            let f2: Double = 1.70 + 0.11 * k
+            let p: Double = 0.7 * k
+            return (f1: f1, f2: f2, p: p)
+        }
     }
 
     func start() {
@@ -37,8 +41,8 @@ final class ProceduralDriver: @unchecked Sendable {
     }
 
     private func tick() {
-        var target = [Float](repeating: 0, count: BarLevels.count)
-        for i in 0..<BarLevels.count {
+        var target = [Float](repeating: 0, count: barCount)
+        for i in 0..<barCount {
             let p = phases[i]
             let raw = 0.52
                 + 0.28 * sin(2 * Double.pi * p.f1 * t + p.p)

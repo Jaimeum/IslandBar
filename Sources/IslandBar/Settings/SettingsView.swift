@@ -15,6 +15,12 @@ struct SettingsView: View {
                         Text(source.title).tag(source)
                     }
                 }
+                Stepper(
+                    "Visualizer bars: \(preferences.visualizerBarCount)",
+                    value: $preferences.visualizerBarCount,
+                    in: BarCount.min...BarCount.max
+                )
+                .help("How many bars the audio visualizer draws (8–12).")
             }
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: $preferences.automaticUpdateChecks)
@@ -31,7 +37,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 330)
+        .frame(width: 380, height: 368)
         .padding(.bottom, 8)
     }
 

@@ -255,14 +255,22 @@ final class TapController: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.burbuja-lab.islandbar.tap")
     private let registry: AudioProcessRegistry
     private let tap = ProcessAudioTap()
-    private let analyzer: SpectrumAnalyzer
-    private let procedural: ProceduralDriver
     private let shared: SharedBarState
-    private let pump: BarLevelPump
+    private let onLevels: @Sendable (BarLevels, Float, Bool) -> Void
+    /// Analyzer, procedural driver and pump all size their buffers from `barCount`.
+    /// Rebuilt together by `reconfigureBars(count:)` when the setting changes.
+    private var analyzer: SpectrumAnalyzer
+    private var procedural: ProceduralDriver
+    private var pump: BarLevelPump
+    private var barCount: Int
 
     private var session: NowPlayingSession?
     private var isPlaying = false
-    private var prefs = PreferencesSnapshot(showPillBackground: true, analysisSource: .automatic)
+    private var prefs = PreferencesSnapshot(
+        showPillBackground: true,
+        analysisSource: .automatic,
+        barCount: BarCount.default
+    )
     private var phase: TapSource = .none
     private var ioWatchWork: DispatchWorkItem?
     private var selectWork: DispatchWorkItem?
@@ -320,13 +328,16 @@ final class TapController: @unchecked Sendable {
     init(
         registry: AudioProcessRegistry,
         shared: SharedBarState,
+        barCount: Int,
         onLevels: @escaping @Sendable (BarLevels, Float, Bool) -> Void
     ) {
         self.registry = registry
         self.shared = shared
-        self.analyzer = SpectrumAnalyzer(ring: tap.ring, shared: shared)
-        self.procedural = ProceduralDriver(shared: shared)
-        self.pump = BarLevelPump(shared: shared, onLevels: onLevels)
+        self.barCount = barCount
+        self.onLevels = onLevels
+        self.analyzer = SpectrumAnalyzer(ring: tap.ring, shared: shared, barCount: barCount)
+        self.procedural = ProceduralDriver(shared: shared, barCount: barCount)
+        self.pump = BarLevelPump(shared: shared, barCount: barCount, onLevels: onLevels)
 
         registry.onProcessListChange = { [weak self] in
             guard let self else { return }
@@ -375,11 +386,15 @@ final class TapController: @unchecked Sendable {
         self.isPlaying = isPlaying
         self.prefs = preferences
 
+        if preferences.barCount != barCount {
+            reconfigureBars(count: preferences.barCount)
+        }
+
         if session == nil {
             cancelTimers()
             tearDownAudio(reason: "session-ended")
             pump.rest()
-            shared.publish(bars: BarLevels.rest.values, rmsDb: -120, fromTap: false)
+            shared.publish(bars: BarLevels.rest(count: barCount).values, rmsDb: -120, fromTap: false)
             return
         }
 
@@ -407,6 +422,37 @@ final class TapController: @unchecked Sendable {
             targetLostSince = nil
             renewTap(reason: playChanged ? "playing" : "session-change")
         }
+    }
+
+    /// Rebuilds the analyzer, procedural driver and pump around a new bar count. Their
+    /// buffers are sized at init and every frame indexes them, so a count change has to
+    /// replace them rather than resize in place. The tap itself is untouched: only the
+    /// thing draining its ring changes. Runs on the tap queue, which owns these objects.
+    private func reconfigureBars(count: Int) {
+        let wasPlaying = isPlaying
+        let tapWasActive = phase.isTapping && tap.isRunning
+        analyzer.stop()
+        procedural.stop()
+        pump.stop()
+
+        barCount = count
+        analyzer = SpectrumAnalyzer(ring: tap.ring, shared: shared, barCount: count)
+        procedural = ProceduralDriver(shared: shared, barCount: count)
+        pump = BarLevelPump(shared: shared, barCount: count, onLevels: onLevels)
+
+        // A fresh set of buffers has no history; seed it at rest so the views redraw at
+        // the new width immediately instead of holding levels from the old one.
+        shared.publish(bars: BarLevels.rest(count: count).values, rmsDb: -120, fromTap: false)
+
+        if wasPlaying {
+            if tapWasActive {
+                attachAnalyzer()
+            } else {
+                procedural.start()
+            }
+            pump.start()
+        }
+        DebugLog.line("bar count reconfigured to \(count)")
     }
 
     private func handleProcessListChange() {

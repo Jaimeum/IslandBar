@@ -1,20 +1,25 @@
 import Foundation
 
+/// How many bars the visualizer draws. User-configurable within these bounds from
+/// Settings; read once per pipeline rebuild, never mutated once an analyzer is running.
+enum BarCount {
+    static let min = 8
+    static let max = 12
+    static let `default` = 12
+
+    static func clamped(_ value: Int) -> Int { Swift.min(max, Swift.max(min, value)) }
+}
+
 struct BarLevels: Equatable, Sendable {
     var values: [Float]
 
-    /// Number of bars everywhere: analyzer bands, procedural motion, palette entries, views.
-    static let count = 12
-    static let rest = BarLevels(values: (0..<count).map { $0 % 2 == 0 ? 0.30 : 0.45 })
-
     init(values: [Float]) {
-        if values.count == Self.count {
-            self.values = values
-        } else {
-            var padded = Array(values.prefix(Self.count))
-            while padded.count < Self.count { padded.append(0.30) }
-            self.values = padded
-        }
+        self.values = values
+    }
+
+    /// The neutral resting contour, one entry per bar: alternating 0.30 and 0.45.
+    static func rest(count: Int) -> BarLevels {
+        BarLevels(values: (0..<count).map { $0 % 2 == 0 ? 0.30 : 0.45 })
     }
 
     static func clampPlaying(_ v: Float) -> Float { min(1.0, max(0.12, v)) }
@@ -27,7 +32,7 @@ struct BarLevels: Equatable, Sendable {
 /// Latest analyzer output. Written from the analysis/procedural queues, read by the main-queue pump every frame.
 final class SharedBarState: @unchecked Sendable {
     private let lock = NSLock()
-    private var bars: [Float] = BarLevels.rest.values
+    private var bars: [Float] = BarLevels.rest(count: BarCount.default).values
     private var rmsDb: Float = -120
     private var fromTap = false
 
@@ -82,21 +87,31 @@ final class BarLevelPump: @unchecked Sendable {
     private static let neighborPull: Float = 0.45
 
     private let shared: SharedBarState
+    private let barCount: Int
     private var timer: DispatchSourceTimer?
     private var lastSecondLog: CFAbsoluteTime = 0
-    private var display: [Float] = BarLevels.rest.values
+    private var display: [Float]
     /// The shaped copy of `display` that actually gets published, plus one scratch
     /// buffer to blur into. Kept apart from `display` deliberately: blending back into
     /// the easing state would re-blur the row every frame and flatten it to its own
     /// mean, which is a much stronger effect than a single pass.
-    private var shaped: [Float] = BarLevels.rest.values
-    private var scratch: [Float] = [Float](repeating: 0, count: BarLevels.count)
+    private var shaped: [Float]
+    private var scratch: [Float]
     /// Always called on the main queue. See the queue split in the type's doc comment.
     private let onLevels: @Sendable (BarLevels, Float, Bool) -> Void
     private(set) var isRunning = false
 
-    init(shared: SharedBarState, onLevels: @escaping @Sendable (BarLevels, Float, Bool) -> Void) {
+    init(
+        shared: SharedBarState,
+        barCount: Int,
+        onLevels: @escaping @Sendable (BarLevels, Float, Bool) -> Void
+    ) {
+        let rest = BarLevels.rest(count: barCount).values
         self.shared = shared
+        self.barCount = barCount
+        self.display = rest
+        self.shaped = rest
+        self.scratch = [Float](repeating: 0, count: barCount)
         self.onLevels = onLevels
     }
 
@@ -176,7 +191,7 @@ final class BarLevelPump: @unchecked Sendable {
         stop()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.display = BarLevels.rest.values
+            self.display = BarLevels.rest(count: self.barCount).values
             guard wasRunning else { return }
             self.shape()
             self.onLevels(BarLevels(values: self.shaped), -120, false)

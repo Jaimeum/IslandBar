@@ -21,6 +21,7 @@ enum AnalysisSource: String, CaseIterable, Identifiable, Sendable {
 struct PreferencesSnapshot: Sendable {
     var showPillBackground: Bool
     var analysisSource: AnalysisSource
+    var barCount: Int
 }
 
 @MainActor
@@ -31,6 +32,18 @@ final class Preferences {
     }
     var analysisSource: AnalysisSource {
         didSet { UserDefaults.standard.set(analysisSource.rawValue, forKey: Keys.analysisSource) }
+    }
+    /// Bars drawn by the visualizer, 8…12. Clamped on the way in so a hand-edited
+    /// defaults file cannot take the pipeline out of the range its buffers assume.
+    var visualizerBarCount: Int {
+        didSet {
+            let clamped = BarCount.clamped(visualizerBarCount)
+            if clamped != visualizerBarCount {
+                visualizerBarCount = clamped
+                return
+            }
+            UserDefaults.standard.set(visualizerBarCount, forKey: Keys.visualizerBarCount)
+        }
     }
     var automaticUpdateChecks: Bool {
         didSet { UserDefaults.standard.set(automaticUpdateChecks, forKey: Keys.automaticUpdateChecks) }
@@ -54,7 +67,8 @@ final class Preferences {
     var snapshot: PreferencesSnapshot {
         PreferencesSnapshot(
             showPillBackground: showPillBackground,
-            analysisSource: analysisSource
+            analysisSource: analysisSource,
+            barCount: visualizerBarCount
         )
     }
 
@@ -66,6 +80,8 @@ final class Preferences {
         showPillBackground = d.object(forKey: Keys.showPillBackground) as? Bool ?? true
         let raw = d.string(forKey: Keys.analysisSource) ?? AnalysisSource.automatic.rawValue
         analysisSource = AnalysisSource(rawValue: raw) ?? .automatic
+        let storedBarCount = d.object(forKey: Keys.visualizerBarCount) as? Int ?? BarCount.default
+        visualizerBarCount = BarCount.clamped(storedBarCount)
         automaticUpdateChecks = d.object(forKey: Keys.automaticUpdateChecks) as? Bool ?? true
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
@@ -73,6 +89,7 @@ final class Preferences {
     private enum Keys {
         static let showPillBackground = "showPillBackground"
         static let analysisSource = "analysisSource"
+        static let visualizerBarCount = "visualizerBarCount"
         static let automaticUpdateChecks = "automaticUpdateChecks"
     }
 }

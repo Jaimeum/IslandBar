@@ -38,7 +38,10 @@ struct Session {
 final class NowPlayingStore {
     var session: Session?
     var isPlaying = false
-    var palette = ArtworkPalette.fallback
+    /// Bars the visualizer draws. Mirrors `Preferences.visualizerBarCount`; kept here so
+    /// the palette and the rest line can be rebuilt to match when it changes.
+    var barCount: Int
+    var palette: ArtworkPalette
     var audioPermissionDenied = false
     var usingProcedural = false
     /// The user declined Apple Events access to the browser, so tab titles cannot be read.
@@ -50,10 +53,15 @@ final class NowPlayingStore {
     /// outside observation: at 60 Hz a tracked property would re-run every SwiftUI
     /// body that touches it. Bar views subscribe with `addLevelObserver` instead.
     @ObservationIgnored
-    var barLevels = BarLevels.rest {
+    var barLevels = BarLevels(values: []) {
         didSet {
             for observer in levelObservers.values { observer(barLevels) }
         }
+    }
+
+    init(barCount: Int) {
+        self.barCount = barCount
+        self.palette = ArtworkPalette.fallback(count: barCount)
     }
 
     @ObservationIgnored
@@ -208,7 +216,7 @@ final class NowPlayingMonitor: MediaTransport {
                 self.rawSession = nil
                 self.browserMedia.stop()
                 self.store.isPlaying = false
-                self.store.palette = .fallback
+                self.store.palette = ArtworkPalette.fallback(count: self.store.barCount)
                 self.lastPaletteKey = nil
                 self.lastArtworkBase64 = nil
                 self.reportedPlaying = false
@@ -307,7 +315,7 @@ final class NowPlayingMonitor: MediaTransport {
         let paletteKey = next.paletteKey + "\u{1e}" + artworkIdentity
         if lastPaletteKey != paletteKey {
             lastPaletteKey = paletteKey
-            store.palette = ArtworkPalette.make(from: next.artwork)
+            store.palette = ArtworkPalette.make(from: next.artwork, count: store.barCount)
             DebugLog.line("palette rebuilt artwork=\(next.artwork != nil) key=\(next.paletteKey)")
         }
         return next

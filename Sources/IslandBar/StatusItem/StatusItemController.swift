@@ -20,8 +20,11 @@ final class StatusItemController: NSObject {
     /// mark once its shrink animation has landed. AppKit reflows the menu bar instantly,
     /// so this can never be animated — only sequenced.
     private var slotWork: DispatchWorkItem?
-    private var slotWidth = CompactIslandMetrics.pillWidth
+    private var slotWidth: CGFloat = 0
     private var slotWidthConstraint: NSLayoutConstraint?
+    private var pillWidth: CGFloat {
+        CompactIslandMetrics.pillWidth(count: preferences.visualizerBarCount)
+    }
     /// Accessory apps do not reliably get transient popovers dismissed by clicks in
     /// other apps, so watch for clicks ourselves while the popover is up.
     private var clickAwayMonitors: [Any] = []
@@ -63,7 +66,7 @@ final class StatusItemController: NSObject {
         // `NSStatusItem.length` looked like it worked (the property read back 37) but the
         // item kept its old footprint, because the button was still being measured from
         // these constraints. So the slot's width is driven from here instead.
-        let width = view.widthAnchor.constraint(equalToConstant: CompactIslandMetrics.pillWidth)
+        let width = view.widthAnchor.constraint(equalToConstant: pillWidth)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: button.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: button.trailingAnchor),
@@ -72,6 +75,7 @@ final class StatusItemController: NSObject {
             width,
         ])
         slotWidthConstraint = width
+        slotWidth = pillWidth
         hosting = view
 
         popover.behavior = .transient
@@ -104,6 +108,7 @@ final class StatusItemController: NSObject {
             _ = store.isPlaying
             _ = store.session?.paletteKey
             _ = preferences.launchAtLogin
+            _ = preferences.visualizerBarCount
         } onChange: { [weak self] in
             DispatchQueue.main.async { self?.tick() }
         }
@@ -118,7 +123,7 @@ final class StatusItemController: NSObject {
         slotWork?.cancel()
         slotWork = nil
         guard !store.isPlaying else {
-            setSlotWidth(CompactIslandMetrics.pillWidth)
+            setSlotWidth(pillWidth)
             return
         }
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
