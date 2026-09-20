@@ -39,6 +39,40 @@ The bars are a waveform, not a bar chart: every bar shares one base and one ceil
 
 The pill follows the menu bar, not the Light/Dark setting: on a light menu bar it drops the black capsule and darkens the bars into a mid-dark band of the same hues, so it reads as bars rather than a black blob on white. Settings › **Show island pill background** only applies where there is a pill to draw. `ISLANDBAR_PILL_APPEARANCE=light|dark` forces either rendering, which is the way to see the light one without changing the desktop picture.
 
+### Per-app volume
+
+Expanding the card also lists every app currently playing audio, each with a fader and a
+mute button — the per-app mixer macOS does not have. Turning one app down leaves the others
+alone, so one loud tab no longer means turning everything down.
+
+The rows are wordless on purpose: the icon is the identity, the bar is the level, the glyph
+is the switch. Hovering names the app, and VoiceOver reads the name and the percentage.
+Muting keeps the fader where it was, so unmuting returns to the level you had. With nothing
+playing the card is exactly the size it has always been.
+
+Four things worth knowing, because they are consequences of how macOS works rather than
+choices:
+
+- **An app left at full volume is never touched.** Core Audio exposes no per-process volume
+  (every `kAudioProcessProperty*` selector is read-only), so the only way to change one app's
+  level is to sever it from the hardware with a `.muted` process tap and re-render its audio
+  at the level you asked for. IslandBar does that only for apps you have actually adjusted.
+  Nothing is tapped, and no recording session is opened, until you move a control.
+- **The recording indicator therefore tracks "something is turned down"**, not just "something
+  is playing". It lights when the first app is adjusted and goes out about three seconds after
+  the last one returns to full.
+- **An adjusted app picks up latency** — about 16 ms on built-in output, and noticeably more
+  over Bluetooth, where the round trip was measured at ~187 ms. An app at full volume pays
+  none of it, which is why returning a fader to 100% releases the app completely.
+- **Control is per application, not per browser tab.** Chromium routes every tab through one
+  audio helper and all WebKit apps share a single GPU process, so the finest granularity the
+  system offers is the process.
+
+Levels are deliberately not remembered across launches: a mute is a moment, and a persisted
+one is how you end up with a silent browser and no memory of why. `ISLANDBAR_MIXER=0` turns
+the mixer off entirely; `ISLANDBAR_MIXER_MUTE_ONLY=1` restricts it to full or silent, with no
+partial re-rendering. `swift Tools/mixerprobe.swift` prints what the mixer sees.
+
 ### Browser tabs
 
 Some browsers publish a Now Playing entry with no title and no artwork (Arc does this from its mini player), which used to leave the card saying just "Arc". When a session from a scriptable browser (Arc, Chrome, Brave, Edge, Vivaldi, Chromium, Opera, Safari) arrives without a title, IslandBar asks the browser for its tabs over Apple Events — a fast check every 4 seconds for the first 12 seconds after a Now Playing event, then every 15 seconds (30 while paused), because each poll is an `osascript` child plus an Apple Event to the browser — picks the tab on a known media site (preferring the active tab right after a Now Playing event, then sticking with the previous pick while it stays open), and shows its cleaned title. YouTube tabs get the channel name and thumbnail from YouTube's oEmbed endpoint and `i.ytimg.com`, which also tints the bars. Metadata the browser does report always wins; the fallback only fills gaps.
@@ -53,7 +87,7 @@ Every Core Audio process tap is a recording session as far as macOS is concerned
 
 - Pausing stops capture at once: the aggregate device's IO engine halts. If the pause outlasts 30 seconds the tap itself is destroyed, and the next resume rebuilds it — macOS's purple recording indicator follows the tap's recording session, and a browser keeps a paused Now Playing session alive for hours, so holding the tap any longer would keep the indicator lit with nothing playing. Resuming inside the grace restarts the engine on the same tap, so a short pause costs no new recording session.
 - A tap is replaced only when it is genuinely wrong: its target processes stopped producing audio for 3 seconds, or a different process owns the same app's playback. Rebuilds are spaced by at least 15 seconds and then back off (20 s, 45 s, 90 s, 180 s, 300 s) within a session.
-- All tap creations reuse one stage-tap UID for the life of the process, so macOS sees the same recording identity rather than a new one each time.
+- Every tap creation gets a **fresh** UID. Reusing one hands back a tap that coreaudiod still holds from the previous incarnation: creation succeeds, the engine reports itself running, and every buffer arrives empty (see PITFALLS.md, "The tap UID must be fresh on every creation").
 - Only a real TCC denial latches the procedural fallback, and it is retried after 5 minutes: a transient `coreaudiod` or device handover error no longer degrades the app until relaunch.
 - A silent passage no longer switches to tapping every process on the machine, which used to rebuild the aggregate device on the way back.
 

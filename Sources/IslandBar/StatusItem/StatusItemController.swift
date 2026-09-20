@@ -10,6 +10,7 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 final class StatusItemController: NSObject {
     private let store: NowPlayingStore
     private let preferences: Preferences
+    private let mixer: AudioMixer
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var hosting: PassthroughHostingView<AnyView>?
@@ -29,11 +30,13 @@ final class StatusItemController: NSObject {
     init(
         store: NowPlayingStore,
         preferences: Preferences,
+        mixer: AudioMixer,
         settings: SettingsWindowController,
         updater: UpdateController
     ) {
         self.store = store
         self.preferences = preferences
+        self.mixer = mixer
         self.settings = settings
         self.updater = updater
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -94,6 +97,21 @@ final class StatusItemController: NSObject {
 
     private func startObserving() {
         tick()
+        mixerTick()
+    }
+
+    /// Deliberately separate from `tick()`. Folding `mixer.rowCount` into that read set
+    /// would re-run `applyPresence` and `applyVisibility` — which reflow the menu bar slot —
+    /// every time an app starts or stops playing.
+    private func mixerTick() {
+        withObservationTracking {
+            // Read unconditionally: `resizeCard` returns early while the popover is closed,
+            // and a tracking closure that reads nothing is never called again.
+            _ = mixer.rowCount
+            resizeCard()
+        } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.mixerTick() }
+        }
     }
 
     private func tick() {
@@ -183,23 +201,40 @@ final class StatusItemController: NSObject {
         if popover.isShown {
             closePopoverIfShown()
         } else {
+            mixer.setPopoverOpen(true)
+            popover.contentSize = ExpandedIslandMetrics.size(rows: mixer.rowCount)
             popover.contentViewController = makeExpandedController()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             installClickAwayMonitors()
         }
     }
 
-    /// The card has a fixed size. Without clearing `sizingOptions` the hosting view
-    /// re-measures the popover frame on every bar frame while the popover is open.
+    /// The card is sized imperatively, here and in `resizeCard`. Without clearing
+    /// `sizingOptions` the hosting view re-measures the popover frame on every bar frame
+    /// while the popover is open.
     private func makeExpandedController() -> NSHostingController<some View> {
         let controller = NSHostingController(
             rootView: ExpandedIslandView()
                 .environment(store)
                 .environment(preferences)
+                .environment(mixer)
         )
         controller.sizingOptions = []
-        controller.view.frame = NSRect(origin: .zero, size: ExpandedIslandMetrics.size)
+        controller.view.frame = NSRect(origin: .zero, size: ExpandedIslandMetrics.size(rows: mixer.rowCount))
         return controller
+    }
+
+    /// The popover's height and its hosting view's frame are the only two consumers of the
+    /// card height, and they are always assigned together here.
+    private func resizeCard() {
+        guard popover.isShown else { return }
+        var size = ExpandedIslandMetrics.size(rows: mixer.rowCount)
+        // Monotonic while open. A row vanishing under a fader mid-drag is the worst thing
+        // this card can do, so it only ever grows until the popover closes.
+        size.height = max(size.height, popover.contentSize.height)
+        guard size != popover.contentSize else { return }
+        popover.contentSize = size
+        popover.contentViewController?.view.frame = NSRect(origin: .zero, size: size)
     }
 
     private func installClickAwayMonitors() {
@@ -330,5 +365,6 @@ final class StatusItemController: NSObject {
 extension StatusItemController: NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         removeClickAwayMonitors()
+        mixer.setPopoverOpen(false)
     }
 }

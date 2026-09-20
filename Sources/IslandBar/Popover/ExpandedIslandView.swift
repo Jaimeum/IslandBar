@@ -1,57 +1,78 @@
 import SwiftUI
 
-/// Single source of truth for the popover size so the SwiftUI frame and
-/// `NSPopover.contentSize` can never disagree (a mismatch clips the card).
+/// Single source of truth for the popover size. The card's height now depends on how many
+/// apps the mixer is showing, so the SwiftUI root no longer pins it: `StatusItemController`
+/// sets `NSPopover.contentSize` and the hosting view's frame together from `size(rows:)`,
+/// and the root simply fills what it is given. That keeps one authority for a height that
+/// changes, instead of three that have to be kept in agreement.
 enum ExpandedIslandMetrics {
     static let width: CGFloat = 300
     static let height: CGFloat = 150
     static let padding: CGFloat = 14
     static let artwork: CGFloat = 72
-    static var size: NSSize { NSSize(width: width, height: height) }
+    /// The now-playing block keeps exactly the height the whole card used to have.
+    static let nowPlayingHeight: CGFloat = height
+    static var size: NSSize { size(rows: 0) }
+
+    static func size(rows: Int) -> NSSize {
+        NSSize(width: width, height: nowPlayingHeight + MixerMetrics.sectionHeight(rows: rows))
+    }
 }
 
 struct ExpandedIslandView: View {
     @Environment(NowPlayingStore.self) private var store
 
     var body: some View {
-        ZStack {
+        // Top-aligned: the popover's height is monotonic while it is open, so when the
+        // mixer empties the card stays tall for a moment. A centred stack would slide the
+        // now-playing block down into the gap.
+        ZStack(alignment: .top) {
             HUDBackground()
-            HStack(alignment: .center, spacing: 14) {
-                artwork
-                VStack(alignment: .leading, spacing: 5) {
-                    MarqueeText(text: displayTitle, font: .headline.bold())
-                        .frame(height: 18)
-                    Text(store.session?.artist ?? " ")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(height: 16, alignment: .leading)
-                    Text(store.session?.appName ?? "")
-                        .font(.caption2)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.white.opacity(0.12), in: Capsule())
-                        .frame(height: 18, alignment: .leading)
-                    ExpandedBars()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: 22) {
-                        transportButton("backward.end.fill") { store.previousTrack() }
-                        transportButton(store.isPlaying ? "pause.fill" : "play.fill") { store.togglePlayPause() }
-                        transportButton("forward.end.fill") { store.nextTrack() }
-                    }
-                    .font(.title3)
-                    .frame(height: 22)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .clipped()
+            VStack(spacing: 0) {
+                nowPlaying
+                    .frame(height: ExpandedIslandMetrics.nowPlayingHeight)
+                MixerListView()
             }
-            .padding(ExpandedIslandMetrics.padding)
-            .foregroundStyle(.white)
         }
-        .frame(width: ExpandedIslandMetrics.width, height: ExpandedIslandMetrics.height)
+        .frame(width: ExpandedIslandMetrics.width)
+        .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
         .environment(\.colorScheme, .dark)
+    }
+
+    private var nowPlaying: some View {
+        HStack(alignment: .center, spacing: 14) {
+            artwork
+            VStack(alignment: .leading, spacing: 5) {
+                MarqueeText(text: displayTitle, font: .headline.bold())
+                    .frame(height: 18)
+                Text(store.session?.artist ?? " ")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(height: 16, alignment: .leading)
+                Text(store.session?.appName ?? "")
+                    .font(.caption2)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(.white.opacity(0.12), in: Capsule())
+                    .frame(height: 18, alignment: .leading)
+                ExpandedBars()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 22) {
+                    transportButton("backward.end.fill") { store.previousTrack() }
+                    transportButton(store.isPlaying ? "pause.fill" : "play.fill") { store.togglePlayPause() }
+                    transportButton("forward.end.fill") { store.nextTrack() }
+                }
+                .font(.title3)
+                .frame(height: 22)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+        }
+        .padding(ExpandedIslandMetrics.padding)
+        .foregroundStyle(.white)
     }
 
     private struct ExpandedBars: View {
