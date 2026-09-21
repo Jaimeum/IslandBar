@@ -37,12 +37,11 @@ enum UpdateFeedError: LocalizedError, Equatable {
 /// `ISLANDBAR_UPDATE_FEED_URL` overrides the feed (a `file://` URL works) so the whole
 /// download-verify-install path can be exercised without publishing anything.
 struct UpdateFeed: Sendable {
-    /// This fork's own releases. An installed build must only ever be replaced by a build
-    /// of the code it was built from: pointed at upstream, the updater downloaded
-    /// MCMike0399's v0.3.6 archive and swapped it over this fork's app, so the mixer card
-    /// and every other local change vanished from a bundle that still sat in `dist/`.
-    /// Upstream's work arrives through `git merge upstream/main`, never through here.
-    static let repository = "Jaimeum/IslandBar"
+    /// The repository whose releases a build installs. A fork must repoint this at its own
+    /// repository before it builds: left as it is, the updater reads this repository's
+    /// latest release and swaps that bundle over the fork's app, silently replacing the
+    /// fork's own work with a build of this tree. See PITFALLS.md.
+    static let repository = "MCMike0399/IslandBar"
     static let releasesPage = URL(string: "https://github.com/\(repository)/releases")!
 
     static var latestURL: URL {

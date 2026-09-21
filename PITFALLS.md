@@ -571,8 +571,8 @@ compiled in. A fork that leaves it pointing at the repository it was forked from
 updater that does exactly what it was told: twenty seconds after launch it reads
 upstream's latest release, sees a version newer than the fork's own `Info.plist`, verifies
 the archive against a key both trees share — and swaps upstream's bundle over the fork's
-app. Nothing fails, so nothing is reported. On 2026-09-20 that replaced this fork's build
-with upstream's v0.3.6 and took the whole mixer card with it.
+app. Nothing fails, so nothing is reported. A fork hit this on 2026-09-20: v0.3.6 landed
+on top of its build and took a whole feature with it.
 
 It is quiet in the worst way: the app is *in the same place*, launches, and works. Only its
 features are someone else's. A build sitting in `dist/` is no safer than an installed one,
@@ -587,6 +587,6 @@ git tag --list --points-at HEAD     # no tag here means this tree released nothi
 ```
 
 Nothing is lost when it happens — the source is in git, and a rebuild restores the fork.
-**Point `repository` at the fork** and take upstream's work through `git merge
-upstream/main` instead, which is the only path that keeps the code and the binary the same
-thing.
+**Point `repository` at the fork's own repository** and take upstream's work through `git
+merge upstream/main` instead, which is the only path that keeps the code and the binary the
+same thing.
