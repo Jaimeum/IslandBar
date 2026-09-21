@@ -488,6 +488,50 @@ for `tapSilenceGrace` (1.2 s) ends the override without waiting for the flag. Th
 playing session go idle. The flag + `outputQuietGrace` path is still there as the
 fallback when no tap exists (procedural mode, denied capture).
 
+## Full screen
+
+### Animating a status item holds the menu bar open
+
+The menu bar auto-hides in a full-screen space. It does not while a status item is redrawing
+sixty times a second: the bar comes down and stays down, and the window's title bar comes
+with it — the app is squeezed from `0,0 1728x1117` to `0,33 1728x1084` for as long as
+something plays. It looks like the app being covered. It is the pill holding the bar open.
+
+Measured with a full-screen window and the pointer parked at the middle of the screen,
+polling `CGWindowListCopyWindowInfo` for the WindowServer's `Menubar` window every 500 ms:
+
+| IslandBar | audio | menu bar over 12 s |
+| --- | --- | --- |
+| quit | playing | hidden from the first sample |
+| running, idle | none | hidden after 10 s |
+| running | playing | **never hidden** |
+
+The gate is `MenuBarAutoHide`. Where the bar hides itself — a full-screen space, or a desktop
+whose owner set auto-hide in Settings — the bars animate only while the pointer is in the menu
+bar, which is the only time anyone can see them. Everywhere else nothing changes.
+
+**Recognize it:** a full-screen window whose height is the screen's less the menu bar, with
+its title bar showing, while music plays.
+**Check it** with the poll above, or in the log:
+
+```
+menu bar auto-hide=on
+pill animation allowed=false        # ...and the bar goes back up
+```
+
+### There is no public API for "is this space full screen"
+
+`NSScreen.visibleFrame` does not change in a full-screen space (measured: 1084 pt of a
+1117 pt screen, in and out), `NSMenu.menuBarVisible()` stays `true`, and the WindowServer's
+`Menubar` window only reports what the bug is already breaking. So `MenuBarAutoHide` reads the
+space instead: every ordinary layer-0 window on it belongs to one application, and that
+application has a window as wide as a display whose height is the display's or the display's
+less the menu bar. Both heights are needed — the short one *is* the held-open state.
+
+The inset comes from `screen.frame.maxY - screen.visibleFrame.maxY`, never from
+`NSStatusBar.system.thickness`: on a notched Mac the bar is 33 pt and that property still
+answers 24, and the nine points made every full-screen window miss its match.
+
 ## Self-update
 
 ### A release key must ship before it signs anything

@@ -14,6 +14,10 @@ final class StatusItemController: NSObject {
     private let mixer: AudioMixer
     private let system: SystemAudioController
     private let statusItem: NSStatusItem
+    /// Owned here so it outlives every rebuild of the hosted root view: a fresh instance
+    /// per rebuild would take its first reading as committed and let the ringing back in.
+    private let menuBarAppearance = MenuBarAppearance()
+    private let menuBarAutoHide = MenuBarAutoHide()
     private let popover = NSPopover()
     private var hosting: PassthroughHostingView<AnyView>?
     private var hostedHeight: CGFloat = 0
@@ -66,6 +70,8 @@ final class StatusItemController: NSObject {
             CompactIslandView(buttonHeight: height)
                 .environment(store)
                 .environment(preferences)
+                .environment(menuBarAppearance)
+                .environment(menuBarAutoHide)
         )
         let view = PassthroughHostingView(rootView: root)
         // The pill has a fixed size. Without this, NSHostingView re-runs
@@ -208,6 +214,8 @@ final class StatusItemController: NSObject {
                 CompactIslandView(buttonHeight: height)
                     .environment(store)
                     .environment(preferences)
+                    .environment(menuBarAppearance)
+                    .environment(menuBarAutoHide)
             )
         }
     }
