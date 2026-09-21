@@ -21,19 +21,19 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     /// Half-open FFT bin ranges per band, rebuilt when the sample rate changes.
     private var bandBins: [(lo: Int, hi: Int)] = []
     private var bandBinsRate: Double = 0
-    private var envelope: [Float] = BarLevels.rest.values
+    private var envelope: [Float]
     /// Per-band running mean (dB) and mean absolute deviation (dB). Bars are
     /// drawn relative to these, so steady loud content sits mid-height and only
     /// transients (beats, hits) reach the top. The old floor/peak AGC pinned
     /// everything near 1.0 because music rarely returns to its quietest frame.
-    private let bandCount = BarLevels.count
-    private var meanDb: [Float] = [Float](repeating: 0, count: BarLevels.count)
-    private var devDb: [Float] = [Float](repeating: 6, count: BarLevels.count)
+    private let bandCount: Int
+    private var meanDb: [Float]
+    private var devDb: [Float]
     private var primed = false
     /// Per-frame scratch, reused so the ~94 analysis frames a second allocate nothing.
-    private var db = [Float](repeating: -120, count: BarLevels.count)
-    private var normalized = [Float](repeating: 0, count: BarLevels.count)
-    private var published = [Float](repeating: 0, count: BarLevels.count)
+    private var db: [Float]
+    private var normalized: [Float]
+    private var published: [Float]
     /// Frames left in the fast-adapting phase after (re)start. Resuming after a pause
     /// used to pin every bar at 1.0 for seconds: the statistics primed on the fade-in
     /// or on silence and then crawled up to the real level at the slow rate.
@@ -42,9 +42,16 @@ final class SpectrumAnalyzer: @unchecked Sendable {
 
     var sampleRate: Double = 48_000
 
-    init(ring: FloatRingBuffer, shared: SharedBarState) {
+    init(ring: FloatRingBuffer, shared: SharedBarState, barCount: Int) {
         self.ring = ring
         self.shared = shared
+        self.bandCount = barCount
+        self.envelope = BarLevels.rest(count: barCount).values
+        self.meanDb = [Float](repeating: 0, count: barCount)
+        self.devDb = [Float](repeating: 6, count: barCount)
+        self.db = [Float](repeating: -120, count: barCount)
+        self.normalized = [Float](repeating: 0, count: barCount)
+        self.published = [Float](repeating: 0, count: barCount)
         window = [Float](repeating: 0, count: n)
         frame = [Float](repeating: 0, count: n)
         realp = [Float](repeating: 0, count: n / 2)
@@ -79,7 +86,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         isRunning = true
         filled = 0
         samplesRead = 0
-        envelope = BarLevels.rest.values
+        envelope = BarLevels.rest(count: bandCount).values
         // Statistics deliberately survive stop/start: a resumed track has the same
         // loudness it had before the pause, so there is nothing to relearn.
         warmupFrames = Self.warmupLength

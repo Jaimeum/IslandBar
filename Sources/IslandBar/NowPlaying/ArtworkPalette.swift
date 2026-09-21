@@ -7,15 +7,15 @@ struct ArtworkPalette: Equatable {
     /// Shown before any artwork arrives: a quiet lavender-to-mist wash, clearly "no
     /// track yet" next to the colour a real cover produces, and never mistaken for
     /// a white-covered album (the old white/blue/peach sweep was).
-    static let fallback: ArtworkPalette = {
+    static func fallback(count: Int) -> ArtworkPalette {
         let anchors = [
             Oklab.fromSRGB(r: 0.62, g: 0.60, b: 0.90),
             Oklab.fromSRGB(r: 0.70, g: 0.68, b: 0.92),
             Oklab.fromSRGB(r: 0.78, g: 0.80, b: 0.94),
             Oklab.fromSRGB(r: 0.86, g: 0.90, b: 0.95),
         ]
-        return ArtworkPalette(colors: colors(through: anchors))
-    }()
+        return ArtworkPalette(colors: colors(through: anchors, count: count))
+    }
 
     /// Lightness band and chroma clamp for the displayed bars. Pastel on purpose: the
     /// island tint has to sit on a black pill without shouting, and a lower chroma
@@ -47,23 +47,22 @@ struct ArtworkPalette: Equatable {
     /// preserved; lightness is lifted and chroma is clamped so the bars stay legible
     /// and calm on the black pill. Greyscale art yields grey bars instead of an
     /// invented tint.
-    static func make(from image: NSImage?) -> ArtworkPalette {
+    static func make(from image: NSImage?, count: Int) -> ArtworkPalette {
         guard let image, let pixels = samplePixels(image), pixels.count >= 16 else {
-            return .fallback
+            return .fallback(count: count)
         }
         let picks = pickPalette(clusterize(pixels))
-        guard !picks.isEmpty else { return .fallback }
-        return ArtworkPalette(colors: colors(through: picks))
+        guard !picks.isEmpty else { return .fallback(count: count) }
+        return ArtworkPalette(colors: colors(through: picks, count: count))
     }
 
     /// Interpolates the anchors in Oklab into one colour per bar and maps them for display.
-    static func colors(through anchors: [Oklab]) -> [Color] {
-        let n = BarLevels.count
+    static func colors(through anchors: [Oklab], count: Int) -> [Color] {
         guard anchors.count > 1 else {
-            return (0..<n).map { _ in Color(nsColor: display(anchors[0])) }
+            return (0..<count).map { _ in Color(nsColor: display(anchors[0])) }
         }
-        return (0..<n).map { i in
-            let t = Double(i) / Double(n - 1) * Double(anchors.count - 1)
+        return (0..<count).map { i in
+            let t = Double(i) / Double(count - 1) * Double(anchors.count - 1)
             let k = min(anchors.count - 2, Int(t))
             let f = t - Double(k)
             return Color(nsColor: display(anchors[k].mixed(toward: anchors[k + 1], f)))

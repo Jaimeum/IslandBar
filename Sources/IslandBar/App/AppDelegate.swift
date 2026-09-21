@@ -18,10 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var termSignal: DispatchSourceSignal?
     private var lastAppliedPlay = false
     private var lastAppliedSession: NowPlayingSession?
+    private var lastAppliedBarCount = BarCount.default
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         preferences = Preferences()
-        store = NowPlayingStore()
+        store = NowPlayingStore(barCount: preferences.visualizerBarCount)
         let registry = AudioProcessRegistry()
         // Deliberately the same registry the monitor and tap controller use. A second one
         // would double every property-listener registration, and `removeListeners()` only
@@ -33,7 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater = UpdateController(preferences: preferences)
         settings = SettingsWindowController(preferences: preferences, updater: updater)
 
-        tapController = TapController(registry: registry, shared: shared) { [weak self] levels, _, _ in
+        tapController = TapController(
+            registry: registry,
+            shared: shared,
+            barCount: preferences.visualizerBarCount
+        ) { [weak self] levels, _, _ in
             // The pump already fires on the main queue; skip the actor hop on every frame.
             MainActor.assumeIsolated {
                 guard let self, self.store.isPlaying else { return }
@@ -138,6 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let session = store.session?.tapSession
             let playing = store.isPlaying
             let prefs = preferences.snapshot
+            if prefs.barCount != lastAppliedBarCount {
+                lastAppliedBarCount = prefs.barCount
+                store.barCount = prefs.barCount
+                store.palette = ArtworkPalette.make(from: store.session?.artwork, count: prefs.barCount)
+                store.barLevels = BarLevels.rest(count: prefs.barCount)
+            }
             if session != lastAppliedSession || playing != lastAppliedPlay {
                 // The mixer keeps this app's row open across a pause, so the card's hero
                 // tile keeps a working fader. It is wired here because the mixer has no
@@ -146,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lastAppliedSession = session
                 lastAppliedPlay = playing
                 if !playing {
-                    store.barLevels = .rest
+                    store.barLevels = BarLevels.rest(count: prefs.barCount)
                 }
                 tapController.apply(session: session, isPlaying: playing, preferences: prefs)
             } else {

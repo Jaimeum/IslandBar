@@ -11,9 +11,11 @@ struct BarMetrics: Equatable {
     /// opposite of what an audio visualiser does: there the outline *is* the signal,
     /// so every bar needs the same headroom for the audio to draw with.
     var maxHeight: CGFloat
+    /// How many bars this row draws. Fixed for the lifetime of a `BarsLayerView`.
+    var count: Int
 
     var totalWidth: CGFloat {
-        CGFloat(BarLevels.count) * barWidth + CGFloat(BarLevels.count - 1) * gap
+        CGFloat(count) * barWidth + CGFloat(count - 1) * gap
     }
 
     var size: CGSize { CGSize(width: totalWidth, height: maxHeight) }
@@ -47,7 +49,7 @@ final class BarsLayerView: NSView {
     /// False while idle or with Reduce Motion on: incoming levels are ignored and
     /// the bars sit at their rest heights.
     var animating = false {
-        didSet { if !animating { apply(.rest) } }
+        didSet { if !animating { apply(BarLevels.rest(count: metrics.count)) } }
     }
 
     /// Neutral idle line, independent of the last artwork. The light variant is what the
@@ -57,9 +59,9 @@ final class BarsLayerView: NSView {
 
     init(metrics: BarMetrics, glow: Bool) {
         self.metrics = metrics
-        barLayers = (0..<BarLevels.count).map { _ in CALayer() }
+        barLayers = (0..<metrics.count).map { _ in CALayer() }
         glowLayer = glow ? CALayer() : nil
-        heights = [CGFloat](repeating: -1, count: BarLevels.count)
+        heights = [CGFloat](repeating: -1, count: metrics.count)
         super.init(frame: NSRect(origin: .zero, size: metrics.size))
         wantsLayer = true
         layerContentsRedrawPolicy = .never
@@ -95,7 +97,7 @@ final class BarsLayerView: NSView {
         flatLayer.cornerRadius = metrics.minHeight / 2
         flatLayer.backgroundColor = Self.idleColor.cgColor
         layer?.addSublayer(flatLayer)
-        apply(.rest)
+        apply(BarLevels.rest(count: metrics.count))
         CATransaction.commit()
     }
 
@@ -107,10 +109,10 @@ final class BarsLayerView: NSView {
     override var intrinsicContentSize: NSSize { metrics.size }
     override var wantsUpdateLayer: Bool { true }
 
-    private var levels = BarLevels.rest
+    private var levels = BarLevels(values: [])
 
     func setPalette(_ palette: ArtworkPalette) {
-        guard palette.colors.count == BarLevels.count else { return }
+        guard palette.colors.count == metrics.count else { return }
         let colors = palette.colors.map { NSColor($0).cgColor }
         guard zip(barLayers, colors).contains(where: { $0.backgroundColor != $1 }) else { return }
         CATransaction.begin()
@@ -118,7 +120,7 @@ final class BarsLayerView: NSView {
         for (bar, color) in zip(barLayers, colors) {
             bar.backgroundColor = color
         }
-        glowLayer?.shadowColor = colors[BarLevels.count / 2]
+        glowLayer?.shadowColor = colors[metrics.count / 2]
         CATransaction.commit()
     }
 
@@ -154,7 +156,7 @@ final class BarsLayerView: NSView {
         self.levels = levels
         var next = heights
         var changed = false
-        for i in 0..<BarLevels.count {
+        for i in 0..<metrics.count {
             let level = i < levels.values.count ? CGFloat(levels.values[i]) : 0
             let raw = max(metrics.minHeight, level * metrics.maxHeight)
             // Compared against the height currently on screen, not the previous
