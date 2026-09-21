@@ -519,3 +519,30 @@ key the previous release did not embed must be signed with the *previous* key. T
 then ships the new key, and the one after it can sign with it. If the old key is missing the
 script refuses, which is the correct outcome — the rotation cannot be completed without it.
 **Never delete the previous private key** until a release carrying the new one is published.
+
+### A fork that keeps upstream's feed updates itself *off* the fork
+
+`UpdateFeed.repository` names the repository whose releases a build installs, and it is
+compiled in. A fork that leaves it pointing at the repository it was forked from has an
+updater that does exactly what it was told: twenty seconds after launch it reads
+upstream's latest release, sees a version newer than the fork's own `Info.plist`, verifies
+the archive against a key both trees share — and swaps upstream's bundle over the fork's
+app. Nothing fails, so nothing is reported. On 2026-09-20 that replaced this fork's build
+with upstream's v0.3.6 and took the whole mixer card with it.
+
+It is quiet in the worst way: the app is *in the same place*, launches, and works. Only its
+features are someone else's. A build sitting in `dist/` is no safer than an installed one,
+because the installer replaces the bundle the running process was launched from.
+
+**Recognize it:** the bundle's `CFBundleShortVersionString` is a version the fork never cut,
+and a feature you wrote is gone from a bundle newer than your last build.
+
+```bash
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' dist/IslandBar.app/Contents/Info.plist
+git tag --list --points-at HEAD     # no tag here means this tree released nothing
+```
+
+Nothing is lost when it happens — the source is in git, and a rebuild restores the fork.
+**Point `repository` at the fork** and take upstream's work through `git merge
+upstream/main` instead, which is the only path that keeps the code and the binary the same
+thing.
